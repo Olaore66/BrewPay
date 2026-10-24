@@ -1,0 +1,2127 @@
+openapi: 3.0.3
+info:
+  title: BrewPay API
+  version: 0.1.0
+  description: |
+    Contract for the merchant web app. This file matches the API on `main`
+    at `6330cb54c685ae7ee420ae1ac9cced8f5ef12988`.
+
+    Import this file into Swagger Editor or Postman. The running server does
+    not serve Swagger UI yet.
+
+    ## What the frontend is building
+
+    BrewPay is a multi-tenant ledger for one Nigerian SME (the organization).
+    The signed-in user is either `OWNER` or `STAFF`. Money is stored only as
+    balanced journals in kobo. The bank the merchant sees today is a local
+    fake. A real Kolomoni client is not connected.
+
+    Suggested screens, in order:
+
+    1. Sign up. `POST /api/v1/organizations`. Keep `id`. This creates the
+       business and its owner. It is not KYC onboarding.
+    2. Sign in. `POST /api/v1/sessions`. Store `token` in memory. Send
+       `Authorization: Bearer <token>` on later calls. The word `Bearer` is
+       case-sensitive and must be followed by one space.
+    3. Learn the role. The session body has no role. Call `GET /api/v1/users`
+       and match `userId` from the session. `OWNER` sees the money screens.
+       `STAFF` can list users and sign out. Every other authenticated route
+       returns 403 for staff.
+    4. Ledger setup, owner only. Create an `ASSET` clearing account and a
+       `LIABILITY` merchant account before collections or transfers.
+    5. Collection account. Open it, then show `externalReference` as the
+       account the customer pays. Credits appear later on
+       `GET /api/v1/collections`. There is no websocket. Poll.
+    6. Pay someone. Enquire the account name, save a beneficiary if the
+       merchant wants to keep it, then submit a transfer. A transfer does
+       not read the beneficiary. Send the account number and bank code again.
+    7. Audit and reconciliation are owner operations screens.
+
+    ## Rules that apply to every call
+
+    - Base path is `/api/v1`. Send `Content-Type: application/json` on bodies.
+    - `X-Organization-Id` is ignored. The session chooses the organization.
+    - Send `X-Correlation-Id` if you want your own id back. It must be 8 to 64
+      characters, start with a letter or digit, then use letters, digits,
+      `.`, `_`, and `-`. Anything else is replaced. The response header and
+      the error body both carry the id the server kept.
+    - Lists are JSON arrays, oldest first. There is no page, cursor, or limit.
+    - Amounts are integers in kobo. `150000` is 1,500.00 naira. Do not send
+      decimals. The currency is always `NGN` and the client does not send it.
+    - There is no balance endpoint, no dashboard total, and no pagination.
+    - There is no CORS configuration. A browser app on another origin will be
+      blocked until a proxy or a later CORS change exists.
+    - Unknown routes return 404 `Resource was not found.`
+    - A body that is not JSON returns 400 `Request could not be read.`
+    - Bean validation returns 400 `Request validation failed.` The `details`
+      array names each field. Nested owner fields look like `owner.email`.
+    - Passwords, session tokens, webhook secrets, and idempotency keys are
+      never returned after the call that created them. The login token is
+      returned once.
+
+    ## Local server
+
+    `GET /api/v1/health` is the ready check. Port 8080 on the dev machine is
+    often Apache httpd. Start the API with `--server.port=8081` when 8080
+    is taken. The database is local PostgreSQL `brewpay_db`.
+
+    On this fake bank, a name enquiry and a new beneficiary return the name
+    `Fake Account`. A transfer returns `SUCCESSFUL` and posts a journal.
+    The merchant app cannot choose those outcomes.
+
+    ## Not built
+
+    KYC, document upload, BVN, business address, CAC number, email
+    verification, invite links, an approval queue, password reset, refresh
+    tokens, beneficiary nicknames, beneficiary edits, a balance read, and
+    the live Kolomoni bank are not in this API.
+servers:
+  - url: http://localhost:8081
+    description: Local API. Use 8081 when Apache httpd holds 8080.
+tags:
+  - name: Health
+    description: Ready check. No session.
+  - name: Organizations
+    description: Create the merchant business and its owner. No session.
+  - name: Sessions
+    description: Sign in and sign out.
+  - name: Users
+    description: Staff inside the signed-in organization.
+  - name: Audit
+    description: Append-only record of what the owner and the system did.
+  - name: Ledger
+    description: Accounts and balanced journals. Source of truth for money.
+  - name: Collections
+    description: The account customers pay, and the credits that landed.
+  - name: Transfers
+    description: Payouts to a Nigerian account number.
+  - name: Name enquiry
+    description: Ask the bank for the name on an account. Does not move money.
+  - name: Beneficiaries
+    description: Save a destination once. Does not move money.
+  - name: Reconciliation
+    description: Compare the bank statement with the ledger. Does not move money.
+  - name: Fake bank
+    description: Bank-to-server webhook. The merchant app does not call this.
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/health:
+    get:
+      tags: [Health]
+      operationId: getHealth
+      summary: Check that the API process is up
+      description: |
+        Use this before showing the app as connected. It does not check the
+        database and it does not need a session.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: The process is up.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+              example:
+                status: UP
+
+  /api/v1/organizations:
+    post:
+      tags: [Organizations]
+      operationId: createOrganization
+      summary: Sign up a merchant and its owner
+      description: |
+        This is the only signup call. It creates one organization with status
+        `ACTIVE` and one user with role `OWNER` and status `ACTIVE`.
+
+        It does not collect KYC, a CAC number, an address, or a bank account.
+        The organization is usable immediately. There is no approval step.
+
+        Keep `id`. Login requires it, because the same email may exist in
+        another organization. Email is stored in lowercase. The password is
+        bcrypt and is not returned.
+
+        There is no `GET` for an organization. The signup response and the
+        session are how the app knows the organization id.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrganizationRequest"
+            example:
+              name: Ada Stores
+              owner:
+                firstName: Ada
+                lastName: Okeke
+                email: ada@example.com
+                password: password-1
+      responses:
+        "201":
+          description: Organization and owner were created.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Organization"
+        "400":
+          $ref: "#/components/responses/ValidationOrBadRequest"
+
+  /api/v1/sessions:
+    post:
+      tags: [Sessions]
+      operationId: createSession
+      summary: Sign in
+      description: |
+        Public. The body must name the organization, the email, and the
+        password. Wrong password, unknown email, and unknown organization all
+        return the same 401 so the app cannot tell which one failed.
+
+        Store `token` only in memory if you can. It is shown once. Send it as
+        `Authorization: Bearer <token>`. The server stores a SHA-256 hash.
+
+        `expiresAt` is 12 hours after login unless the user signs out. There
+        is no refresh token. On 401 `Session is invalid.`, send the user to
+        sign in again.
+
+        The body does not include the role. After login, call `GET /api/v1/users`
+        and find the row whose `id` equals `userId`.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+            example:
+              organizationId: 4f3b1c0a-6d2e-4a18-9b77-1c2d3e4f5a6b
+              email: ada@example.com
+              password: password-1
+      responses:
+        "201":
+          description: Session created. The token is in this body only.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          $ref: "#/components/responses/ValidationOrBadRequest"
+        "401":
+          description: Email or password is wrong.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: UNAUTHORIZED
+                message: Email or password is wrong.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+
+  /api/v1/sessions/current:
+    delete:
+      tags: [Sessions]
+      operationId: revokeSession
+      summary: Sign out
+      description: |
+        Revokes the session in the `Authorization` header. The next call with
+        that token returns 401 `Session is invalid.` Owner and staff can both
+        sign out. The response has no body.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "204":
+          description: The session was revoked.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/users:
+    post:
+      tags: [Users]
+      operationId: createUser
+      summary: Add a staff user
+      description: |
+        Owner only. Creates a `STAFF` user in the signed-in organization.
+        The owner chooses that person's first password. There is no invite
+        email. Email is unique inside the organization and is stored in
+        lowercase. The same email may exist in a second organization.
+
+        Staff who call this get 403 `You do not have permission to perform this action.`
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+            example:
+              firstName: Chi
+              lastName: Nwosu
+              email: chi@example.com
+              password: password-1
+      responses:
+        "201":
+          description: Staff user created.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/ValidationOrBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: That email is already in this organization.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: CONFLICT
+                message: A user with this email already exists in the organization.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+    get:
+      tags: [Users]
+      operationId: listUsers
+      summary: List users in this organization
+      description: |
+        Owner and staff. Oldest first. Use this after login to read the
+        caller's `role`. Passwords are not included.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Users in the signed-in organization.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/users/{id}:
+    get:
+      tags: [Users]
+      operationId: getUser
+      summary: Read one user in this organization
+      description: |
+        Owner and staff. A user from another organization and an unknown id
+        both return 404 `User was not found.`
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The user.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: User was not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: User was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+
+  /api/v1/audit-events:
+    get:
+      tags: [Audit]
+      operationId: listAuditEvents
+      summary: Read the append-only audit
+      description: |
+        Owner only. Oldest first. Staff receive 403.
+
+        Each row is an action, a target type, and sometimes a target id.
+        Denial rows have a null `targetId`. The rows do not contain the
+        password, the session token, the webhook secret, the idempotency key,
+        a destination account number, or an amount.
+
+        There is no filter and no detail endpoint. Build the audit screen
+        from this list.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Audit rows for this organization.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEvent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/ledger/accounts:
+    post:
+      tags: [Ledger]
+      operationId: createLedgerAccount
+      summary: Create a ledger account
+      description: |
+        Owner only. Do this before a collection account or a transfer.
+
+        `code` is stored in uppercase and is unique inside the organization.
+        `type` is `ASSET`, `LIABILITY`, `EQUITY`, `INCOME`, or `EXPENSE`.
+
+        For collections and transfers the app needs two accounts:
+
+        - clearing, type `ASSET`
+        - merchant, type `LIABILITY`
+
+        A duplicate code returns 409 `An account with this code already exists in the organization.`
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAccountRequest"
+            examples:
+              clearing:
+                value:
+                  code: clearing
+                  name: Clearing
+                  type: ASSET
+              merchant:
+                value:
+                  code: merchant
+                  name: Merchant funds
+                  type: LIABILITY
+      responses:
+        "201":
+          description: Account created.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerAccount"
+        "400":
+          $ref: "#/components/responses/ValidationOrBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The code is already used in this organization.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: CONFLICT
+                message: An account with this code already exists in the organization.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+    get:
+      tags: [Ledger]
+      operationId: listLedgerAccounts
+      summary: List ledger accounts
+      description: Owner only. Oldest first.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Accounts in this organization.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LedgerAccount"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/ledger/accounts/{id}:
+    get:
+      tags: [Ledger]
+      operationId: getLedgerAccount
+      summary: Read one ledger account
+      description: |
+        Owner only. Another organization's account and an unknown id both
+        return 404 `Account was not found.`
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The account.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerAccount"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Account was not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: Account was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+
+  /api/v1/ledger/journals:
+    post:
+      tags: [Ledger]
+      operationId: postJournal
+      summary: Post a balanced journal
+      description: |
+        Owner only. This is a manual journal, not a transfer and not a
+        collection. Collections and successful transfers post their own journals.
+
+        Send header `Idempotency-Key`. Generate a new key for each new post
+        the user confirms. Retry the same key only with the same body. The
+        key is 8 to 128 characters, starts with a letter or digit, then uses
+        letters, digits, `.`, `_`, `:`, and `-`. A UUID is valid.
+
+        The same key and the same lines return the first journal again, still
+        with HTTP 201. The same key with a different body returns 409
+        `Idempotency key was already used with a different request.`
+        A rejected post does not consume the key.
+
+        At least two lines are required. Debits must equal credits. Amounts
+        are positive kobo. The server stores currency `NGN`. The client does
+        not send a currency.
+
+        Business errors, all 400 `BAD_REQUEST`:
+
+        - `Idempotency key is required.`
+        - `Idempotency key is invalid.`
+        - `Journal is not balanced.`
+        - `Journal needs at least two lines.`
+        - `Journal amount must be positive.`
+        - `Journal amount is too large.`
+        - `Journal description is invalid.`
+        - `Journal line direction is invalid.`
+
+        A line that names an account outside this organization returns 404
+        `Account was not found.`
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostJournalRequest"
+            example:
+              description: Till sales
+              lines:
+                - accountId: 11111111-1111-1111-1111-111111111111
+                  direction: DEBIT
+                  amountKobo: 150000
+                - accountId: 22222222-2222-2222-2222-222222222222
+                  direction: CREDIT
+                  amountKobo: 150000
+      responses:
+        "201":
+          description: The journal. A replay of the same key returns this same journal.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Journal"
+        "400":
+          $ref: "#/components/responses/ValidationOrBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: A line names an account that is not in this organization.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: Account was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+    get:
+      tags: [Ledger]
+      operationId: listJournals
+      summary: List journals
+      description: |
+        Owner only. Oldest first. Each journal includes its lines. This is
+        the history of money movement. It is not a balance API.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Journals in this organization.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Journal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/ledger/journals/{id}:
+    get:
+      tags: [Ledger]
+      operationId: getJournal
+      summary: Read one journal
+      description: |
+        Owner only. Another organization's journal and an unknown id both
+        return 404 `Journal was not found.`
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The journal and its lines.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Journal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Journal was not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: Journal was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+
+  /api/v1/ledger/journals/{id}/reversals:
+    post:
+      tags: [Ledger]
+      operationId: reverseJournal
+      summary: Reverse a journal by posting a new one
+      description: |
+        Owner only. No request body. The server appends a new journal with
+        the debit and credit directions swapped and sets `reversesJournalId`
+        to the original. The original lines stay as they were.
+
+        A second reversal of that same original returns 409
+        `Journal is already reversed.`
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "201":
+          description: The new reversing journal.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Journal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Journal was not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: Journal was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+        "409":
+          description: That journal already has a reversal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: CONFLICT
+                message: Journal is already reversed.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+
+  /api/v1/collection-accounts:
+    post:
+      tags: [Collections]
+      operationId: openCollectionAccount
+      summary: Open the account customers pay
+      description: |
+        Owner only. Point it at two ledger accounts in this organization.
+        Clearing must be `ASSET`. Merchant must be `LIABILITY`. They must be
+        different accounts.
+
+        The response `externalReference` is what the customer pays. On the
+        local fake it looks like `FAKE-` plus a UUID. Show that value. There
+        is no separate virtual-account number field yet.
+
+        There is no get-by-id. Use the list.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenCollectionAccountRequest"
+      responses:
+        "201":
+          description: Collection account opened.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionAccount"
+        "400":
+          description: |
+            `Collection uses two different ledger accounts.`,
+            `Clearing account must be an asset.`, or
+            `Merchant account must be a liability.`
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: One of the ledger accounts is not in this organization.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: Account was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+    get:
+      tags: [Collections]
+      operationId: listCollectionAccounts
+      summary: List collection accounts
+      description: Owner only. Oldest first.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Collection accounts in this organization.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CollectionAccount"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/collections:
+    get:
+      tags: [Collections]
+      operationId: listCollections
+      summary: List credits that landed
+      description: |
+        Owner only. Oldest first. A row appears only after a successful bank
+        webhook. Each row has `amountKobo` and `journalId`. Poll this list.
+        There is no push channel.
+
+        `PENDING`, `FAILED`, and `UNKNOWN` bank events do not add a row.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Collections in this organization.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Collection"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/collections/{id}:
+    get:
+      tags: [Collections]
+      operationId: getCollection
+      summary: Read one collection
+      description: |
+        Owner only. Another organization's collection and an unknown id both
+        return 404 `Collection was not found.`
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The collection.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Collection"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Collection was not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: Collection was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+
+  /api/v1/transfers:
+    post:
+      tags: [Transfers]
+      operationId: submitTransfer
+      summary: Pay a Nigerian account
+      description: |
+        Owner only. Send `Idempotency-Key` using the same rules as a journal
+        post. Generate one key when the user confirms the payout. Retry that
+        same key with the same body if the response is lost. A different body
+        with that key returns 409.
+
+        The destination account number is 10 digits. The bank code is 3 to 6
+        digits. Both are trimmed. This call does not require a name enquiry
+        or a saved beneficiary. If the screen showed a name, send the account
+        number and bank code again here.
+
+        Clearing must be `ASSET`. Merchant must be `LIABILITY`. Amount is
+        positive kobo.
+
+        Read `status` on the 201 body:
+
+        - `SUCCESSFUL` means one journal was posted. `journalId` and
+          `providerReference` are set. The journal debits the merchant
+          liability and credits the clearing asset.
+        - `FAILED` means the provider refused. No journal. `journalId` is null.
+        - `UNKNOWN` means the provider did not answer. No journal and no
+          provider reference. Keep showing it as unknown. Do not mark it paid.
+          Sending the same key again returns this same transfer and does not
+          submit it again.
+
+        On the local fake, an unscripted transfer is `SUCCESSFUL`.
+
+        A validation failure and a staff denial do not consume the key.
+
+        Business errors, 400 `BAD_REQUEST`:
+
+        - `Idempotency key is required.`
+        - `Idempotency key is invalid.`
+        - `Transfer amount must be positive.`
+        - `Transfer uses two different ledger accounts.`
+        - `Clearing account must be an asset.`
+        - `Merchant account must be a liability.`
+        - `Destination account number is invalid.`
+        - `Destination bank code is invalid.`
+
+        A clearing or merchant account outside this organization returns 404
+        `Account was not found.`
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitTransferRequest"
+            example:
+              clearingAccountId: 11111111-1111-1111-1111-111111111111
+              merchantAccountId: 22222222-2222-2222-2222-222222222222
+              amountKobo: 250000
+              destinationAccountNumber: "0123456789"
+              destinationBankCode: "058"
+      responses:
+        "201":
+          description: The transfer, including a replay of the same key.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transfer"
+        "400":
+          $ref: "#/components/responses/ValidationOrBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: A ledger account on the transfer is not in this organization.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: Account was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+    get:
+      tags: [Transfers]
+      operationId: listTransfers
+      summary: List transfers
+      description: Owner only. Oldest first. Use `status` to render pending-unknown, failed, and paid.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Transfers in this organization.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Transfer"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/transfers/{id}:
+    get:
+      tags: [Transfers]
+      operationId: getTransfer
+      summary: Read one transfer
+      description: |
+        Owner only. Another organization's transfer and an unknown id both
+        return 404 `Transfer was not found.`
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The transfer.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transfer"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Transfer was not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: Transfer was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+
+  /api/v1/account-name-enquiries:
+    post:
+      tags: [Name enquiry]
+      operationId: enquireAccountName
+      summary: Ask the bank for the account name
+      description: |
+        Owner only. Use this on the payout form while the user types an
+        account number and bank code, or before they confirm a new payee.
+
+        There is no `Idempotency-Key` and no amount. Every successful answer
+        stores a new enquiry. Asking again does not update the previous row.
+
+        The account number is 10 digits. The bank code is 3 to 6 digits.
+        The call posts no journal and does not create a transfer.
+
+        On the local fake, the name is `Fake Account`.
+
+        Errors:
+
+        - 404 `Account name was not found.` Nothing is stored.
+        - 400 `Provider did not answer.` Nothing is stored.
+        - 400 `Destination account number is invalid.` The bank is not called.
+        - 400 `Destination bank code is invalid.` The bank is not called.
+        - 400 `Account name is invalid.` A name longer than 200 characters. Nothing is stored.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DestinationAccountRequest"
+            example:
+              destinationAccountNumber: "0123456789"
+              destinationBankCode: "058"
+      responses:
+        "201":
+          description: The provider name for this enquiry.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountNameEnquiry"
+        "400":
+          $ref: "#/components/responses/ValidationOrBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: The bank has no such account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: Account name was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+    get:
+      tags: [Name enquiry]
+      operationId: listAccountNameEnquiries
+      summary: List past name enquiries
+      description: |
+        Owner only. Oldest first. This is a history of lookups, not the
+        saved payee list. Use beneficiaries for the payee list.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Enquiries in this organization.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AccountNameEnquiry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/account-name-enquiries/{id}:
+    get:
+      tags: [Name enquiry]
+      operationId: getAccountNameEnquiry
+      summary: Read one name enquiry
+      description: |
+        Owner only. Another organization's enquiry and an unknown id both
+        return 404 `Account name enquiry was not found.`
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The enquiry.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountNameEnquiry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Account name enquiry was not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: Account name enquiry was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+
+  /api/v1/beneficiaries:
+    post:
+      tags: [Beneficiaries]
+      operationId: saveBeneficiary
+      summary: Save a payee
+      description: |
+        Owner only. The body is the account number and the bank code. There
+        is no nickname and no `Idempotency-Key`. The server asks the bank for
+        the name and stores it.
+
+        The same organization, account number, and bank code are stored once.
+        A later save returns that first row with HTTP 201. It does not ask
+        the bank again and it does not change the stored name. A different
+        bank code is a different beneficiary. Another organization can save
+        the same account and receives its own row.
+
+        If the screen needs a fresh name after the first save, call name
+        enquiry. That does not update the beneficiary.
+
+        Saving posts no journal, stores no name-enquiry row, and does not
+        submit a transfer.
+
+        On the local fake, the first save of an account returns `Fake Account`.
+
+        Errors match name enquiry:
+
+        - 404 `Account name was not found.` Nothing is stored.
+        - 400 `Provider did not answer.` Nothing is stored.
+        - 400 `Destination account number is invalid.` The bank is not called.
+        - 400 `Destination bank code is invalid.` The bank is not called.
+        - 400 `Account name is invalid.` Nothing is stored.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DestinationAccountRequest"
+            example:
+              destinationAccountNumber: "0123456789"
+              destinationBankCode: "058"
+      responses:
+        "201":
+          description: The stored beneficiary. A repeat returns the first row.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Beneficiary"
+        "400":
+          $ref: "#/components/responses/ValidationOrBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: The bank has no such account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: Account name was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+    get:
+      tags: [Beneficiaries]
+      operationId: listBeneficiaries
+      summary: List saved payees
+      description: Owner only. Oldest first. This is the payee picker.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Beneficiaries in this organization.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Beneficiary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/beneficiaries/{id}:
+    get:
+      tags: [Beneficiaries]
+      operationId: getBeneficiary
+      summary: Read one saved payee
+      description: |
+        Owner only. Another organization's beneficiary and an unknown id both
+        return 404 `Beneficiary was not found.` There is no update and no delete.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The beneficiary.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Beneficiary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Beneficiary was not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: Beneficiary was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+
+  /api/v1/reconciliation-runs:
+    post:
+      tags: [Reconciliation]
+      operationId: runReconciliation
+      summary: Compare the bank statement with the ledger
+      description: |
+        Owner only. No request body. The statement comes from the bank. The
+        merchant app cannot upload lines. On the local fake the statement
+        starts empty, so a run often returns an empty `findings` list and
+        HTTP 201.
+
+        The run does not post a journal, reverse a journal, or change a
+        collection or a transfer. A transfer that is `UNKNOWN` stays
+        `UNKNOWN` even if the statement later says success. That case is a
+        `STATUS_MISMATCH` finding.
+
+        The same mismatch on a later run returns the first finding id and
+        still records a new run. Build the screen from `findings` on this
+        response, or from `GET /api/v1/reconciliation-findings`.
+
+        There is no get-run-by-id route. `id` on this response is the run id.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "201":
+          description: The run and the findings from this look.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconciliationRun"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/reconciliation-findings:
+    get:
+      tags: [Reconciliation]
+      operationId: listReconciliationFindings
+      summary: List reconciliation findings
+      description: |
+        Owner only. Oldest first. Codes are `STATUS_MISMATCH`,
+        `AMOUNT_MISMATCH`, `MISSING_ON_LEDGER`, and `MISSING_AT_PROVIDER`.
+        `subjectType` is `COLLECTION` or `TRANSFER`. Some amount and status
+        fields are null when that side has no value.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Findings in this organization.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReconciliationFinding"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/reconciliation-findings/{id}:
+    get:
+      tags: [Reconciliation]
+      operationId: getReconciliationFinding
+      summary: Read one reconciliation finding
+      description: |
+        Owner only. Another organization's finding and an unknown id both
+        return 404 `Reconciliation finding was not found.`
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The finding.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconciliationFinding"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Reconciliation finding was not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: Reconciliation finding was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+
+  /api/v1/webhooks/fake-bank:
+    post:
+      tags: [Fake bank]
+      operationId: receiveFakeBankWebhook
+      summary: Bank webhook that credits a collection
+      description: |
+        Not for the merchant app. The bank calls this. It is public and does
+        not use the session. The header `X-Fake-Bank-Signature` is the hex
+        HMAC-SHA256 of the raw body. A bad signature returns 401
+        `Webhook signature is invalid.`
+
+        A `SUCCESSFUL` body posts one journal and returns 201. Sending the
+        same `eventId` again returns that same collection and does not post
+        a second journal. A different amount with the same event returns 409.
+
+        `PENDING`, `FAILED`, and `UNKNOWN` return 200 and store nothing.
+        `collection` is null on that response. A later success with that
+        event can still credit.
+
+        The frontend sees the result on `GET /api/v1/collections`.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - name: X-Fake-Bank-Signature
+          in: header
+          required: true
+          description: Hex HMAC-SHA256 of the raw body. Local fake secret only.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FakeBankWebhook"
+            example:
+              eventId: evt-2026-0001
+              accountReference: FAKE-4f3b1c0a-6d2e-4a18-9b77-1c2d3e4f5a6b
+              amountKobo: 150000
+              status: SUCCESSFUL
+      responses:
+        "201":
+          description: A collection was stored.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionWebhookResult"
+        "200":
+          description: The event was not successful, so nothing was stored.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionWebhookResult"
+              example:
+                status: PENDING
+                collection: null
+        "400":
+          description: The body could not be read, or the amount was not positive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Webhook signature is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: UNAUTHORIZED
+                message: Webhook signature is invalid.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+        "404":
+          description: Collection account was not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: Collection account was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Session token from `POST /api/v1/sessions`. Send
+        `Authorization: Bearer <token>`. Missing or malformed credentials
+        return 401 `Authentication is required.` A revoked, expired, or
+        unknown token returns 401 `Session is invalid.`
+  headers:
+    CorrelationId:
+      description: The correlation id the server kept for this call.
+      schema:
+        type: string
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: |
+        Optional. 8 to 64 characters. Starts with a letter or digit, then
+        letters, digits, `.`, `_`, and `-`. Unsafe values are replaced.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 64
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Required on journal post and transfer submit. 8 to 128 characters.
+        Starts with a letter or digit, then letters, digits, `.`, `_`, `:`,
+        and `-`. One key per confirmed user action.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Unauthorized:
+      description: |
+        `Authentication is required.` or `Session is invalid.`
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            code: UNAUTHORIZED
+            message: Authentication is required.
+            correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+            details: []
+    Forbidden:
+      description: The signed-in user is staff, and this route is owner only.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            code: FORBIDDEN
+            message: You do not have permission to perform this action.
+            correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+            details: []
+    ValidationOrBadRequest:
+      description: |
+        `VALIDATION_FAILED` with `Request validation failed.` and a `details`
+        list, or `BAD_REQUEST` with one message and an empty `details` list.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    IdempotencyConflict:
+      description: This key was already stored with a different body.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            code: CONFLICT
+            message: Idempotency key was already used with a different request.
+            correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+            details: []
+  schemas:
+    ApiError:
+      type: object
+      required: [code, message, correlationId, details]
+      properties:
+        code:
+          type: string
+          enum:
+            - VALIDATION_FAILED
+            - BAD_REQUEST
+            - UNAUTHORIZED
+            - FORBIDDEN
+            - NOT_FOUND
+            - CONFLICT
+            - INTERNAL_ERROR
+        message:
+          type: string
+          description: |
+            Safe text for the UI. A 500 is always `Something went wrong.`
+        correlationId:
+          type: string
+        details:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldViolation"
+    FieldViolation:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: UP
+    CreateOrganizationRequest:
+      type: object
+      required: [name, owner]
+      properties:
+        name:
+          type: string
+          maxLength: 160
+          description: Display name of the business. Not a unique key.
+        owner:
+          $ref: "#/components/schemas/CreateOwner"
+    CreateOwner:
+      type: object
+      required: [firstName, lastName, email, password]
+      properties:
+        firstName:
+          type: string
+          maxLength: 80
+        lastName:
+          type: string
+          maxLength: 80
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+    Organization:
+      type: object
+      required: [id, name, status, owner]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE]
+        owner:
+          $ref: "#/components/schemas/User"
+    CreateSessionRequest:
+      type: object
+      required: [organizationId, email, password]
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        password:
+          type: string
+          format: password
+          maxLength: 72
+    Session:
+      type: object
+      required: [id, organizationId, userId, token, expiresAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        token:
+          type: string
+          description: Shown once. Send it as a Bearer token.
+        expiresAt:
+          type: string
+          format: date-time
+    CreateUserRequest:
+      type: object
+      required: [firstName, lastName, email, password]
+      properties:
+        firstName:
+          type: string
+          maxLength: 80
+        lastName:
+          type: string
+          maxLength: 80
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+    User:
+      type: object
+      required: [id, organizationId, firstName, lastName, email, status, role]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
+        status:
+          type: string
+          enum: [ACTIVE]
+        role:
+          type: string
+          enum: [OWNER, STAFF]
+    AuditEvent:
+      type: object
+      required: [id, organizationId, actorUserId, action, targetType, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        actorUserId:
+          type: string
+          format: uuid
+        action:
+          type: string
+          description: One of the audit action names.
+          enum:
+            - SESSION_CREATED
+            - SESSION_REJECTED
+            - SESSION_REVOKED
+            - USER_CREATED
+            - USER_CREATE_DENIED
+            - AUDIT_READ_DENIED
+            - ACCOUNT_CREATED
+            - JOURNAL_POSTED
+            - JOURNAL_REVERSED
+            - JOURNAL_POST_DENIED
+            - JOURNAL_REVERSE_DENIED
+            - COLLECTION_ACCOUNT_OPENED
+            - COLLECTION_ACCOUNT_OPEN_DENIED
+            - COLLECTION_CREDITED
+            - TRANSFER_SUBMITTED
+            - TRANSFER_SUBMIT_DENIED
+            - RECONCILIATION_RUN
+            - RECONCILIATION_RUN_DENIED
+            - ACCOUNT_NAME_ENQUIRED
+            - ACCOUNT_NAME_ENQUIRY_DENIED
+            - BENEFICIARY_CREATED
+            - BENEFICIARY_CREATE_DENIED
+        targetType:
+          type: string
+          enum:
+            - SESSION
+            - USER
+            - AUDIT
+            - ACCOUNT
+            - JOURNAL
+            - COLLECTION_ACCOUNT
+            - COLLECTION
+            - TRANSFER
+            - RECONCILIATION_RUN
+            - ACCOUNT_NAME_ENQUIRY
+            - BENEFICIARY
+        targetId:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    CreateAccountRequest:
+      type: object
+      required: [code, name, type]
+      properties:
+        code:
+          type: string
+          maxLength: 32
+        name:
+          type: string
+          maxLength: 160
+        type:
+          type: string
+          enum: [ASSET, LIABILITY, EQUITY, INCOME, EXPENSE]
+    LedgerAccount:
+      type: object
+      required: [id, organizationId, code, name, type]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [ASSET, LIABILITY, EQUITY, INCOME, EXPENSE]
+    PostJournalRequest:
+      type: object
+      required: [description, lines]
+      properties:
+        description:
+          type: string
+          maxLength: 200
+        lines:
+          type: array
+          minItems: 2
+          items:
+            $ref: "#/components/schemas/JournalLineRequest"
+    JournalLineRequest:
+      type: object
+      required: [accountId, direction, amountKobo]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        direction:
+          type: string
+          enum: [DEBIT, CREDIT]
+        amountKobo:
+          type: integer
+          format: int64
+          minimum: 1
+    Journal:
+      type: object
+      required: [id, organizationId, description, currency, createdAt, lines]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        description:
+          type: string
+        currency:
+          type: string
+          enum: [NGN]
+        reversesJournalId:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/JournalLine"
+    JournalLine:
+      type: object
+      required: [accountId, direction, amountKobo, position]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        direction:
+          type: string
+          enum: [DEBIT, CREDIT]
+        amountKobo:
+          type: integer
+          format: int64
+        position:
+          type: integer
+    OpenCollectionAccountRequest:
+      type: object
+      required: [clearingAccountId, merchantAccountId]
+      properties:
+        clearingAccountId:
+          type: string
+          format: uuid
+          description: Must be an ASSET ledger account in this organization.
+        merchantAccountId:
+          type: string
+          format: uuid
+          description: Must be a LIABILITY ledger account in this organization.
+    CollectionAccount:
+      type: object
+      required: [id, organizationId, externalReference, clearingAccountId, merchantAccountId]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        externalReference:
+          type: string
+          description: The reference the customer pays. Local values start with FAKE-.
+        clearingAccountId:
+          type: string
+          format: uuid
+        merchantAccountId:
+          type: string
+          format: uuid
+    Collection:
+      type: object
+      required: [id, organizationId, collectionAccountId, providerEventId, amountKobo, journalId]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        collectionAccountId:
+          type: string
+          format: uuid
+        providerEventId:
+          type: string
+        amountKobo:
+          type: integer
+          format: int64
+        journalId:
+          type: string
+          format: uuid
+    SubmitTransferRequest:
+      type: object
+      required:
+        - clearingAccountId
+        - merchantAccountId
+        - amountKobo
+        - destinationAccountNumber
+        - destinationBankCode
+      properties:
+        clearingAccountId:
+          type: string
+          format: uuid
+        merchantAccountId:
+          type: string
+          format: uuid
+        amountKobo:
+          type: integer
+          format: int64
+          minimum: 1
+        destinationAccountNumber:
+          type: string
+          description: 10 digits after trim.
+          example: "0123456789"
+        destinationBankCode:
+          type: string
+          description: 3 to 6 digits after trim.
+          example: "058"
+    Transfer:
+      type: object
+      required:
+        - id
+        - organizationId
+        - status
+        - amountKobo
+        - destinationAccountNumber
+        - destinationBankCode
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [SUCCESSFUL, FAILED, UNKNOWN]
+        amountKobo:
+          type: integer
+          format: int64
+        destinationAccountNumber:
+          type: string
+        destinationBankCode:
+          type: string
+        providerReference:
+          type: string
+          nullable: true
+        journalId:
+          type: string
+          format: uuid
+          nullable: true
+    DestinationAccountRequest:
+      type: object
+      required: [destinationAccountNumber, destinationBankCode]
+      properties:
+        destinationAccountNumber:
+          type: string
+          description: 10 digits after trim.
+          example: "0123456789"
+        destinationBankCode:
+          type: string
+          description: 3 to 6 digits after trim.
+          example: "058"
+    AccountNameEnquiry:
+      type: object
+      required:
+        - id
+        - organizationId
+        - destinationAccountNumber
+        - destinationBankCode
+        - accountName
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        destinationAccountNumber:
+          type: string
+        destinationBankCode:
+          type: string
+        accountName:
+          type: string
+    Beneficiary:
+      type: object
+      required:
+        - id
+        - organizationId
+        - destinationAccountNumber
+        - destinationBankCode
+        - accountName
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        destinationAccountNumber:
+          type: string
+        destinationBankCode:
+          type: string
+        accountName:
+          type: string
+          description: The name from the first successful save. Later saves do not change it.
+    ReconciliationRun:
+      type: object
+      required: [id, findings]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The run id. There is no get-by-id for the run.
+        findings:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReconciliationFinding"
+    ReconciliationFinding:
+      type: object
+      required: [id, organizationId, code, subjectType]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        code:
+          type: string
+          enum:
+            - STATUS_MISMATCH
+            - AMOUNT_MISMATCH
+            - MISSING_ON_LEDGER
+            - MISSING_AT_PROVIDER
+        subjectType:
+          type: string
+          enum: [COLLECTION, TRANSFER]
+        subjectId:
+          type: string
+          format: uuid
+          nullable: true
+        providerReference:
+          type: string
+          nullable: true
+        providerStatus:
+          type: string
+          nullable: true
+          enum: [PENDING, SUCCESSFUL, FAILED, UNKNOWN]
+        ourStatus:
+          type: string
+          nullable: true
+          enum: [PENDING, SUCCESSFUL, FAILED, UNKNOWN]
+        providerAmountKobo:
+          type: integer
+          format: int64
+          nullable: true
+        ourAmountKobo:
+          type: integer
+          format: int64
+          nullable: true
+    FakeBankWebhook:
+      type: object
+      required: [eventId, accountReference, amountKobo, status]
+      properties:
+        eventId:
+          type: string
+          description: 8 to 128 characters, same shape as Idempotency-Key.
+        accountReference:
+          type: string
+          description: The collection account externalReference.
+        amountKobo:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [PENDING, SUCCESSFUL, FAILED, UNKNOWN]
+    CollectionWebhookResult:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [PENDING, SUCCESSFUL, FAILED, UNKNOWN]
+        collection:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Collection"
