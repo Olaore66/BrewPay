@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.jar binary
+mvnw text eol=lf
+.mvn/wrapper/maven-wrapper.jar binary
