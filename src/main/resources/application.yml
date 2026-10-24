@@ -1,6 +1,16 @@
 spring:
   application:
     name: brewpay
+  datasource:
+    url: ${BREWPAY_DB_URL:jdbc:postgresql://localhost:5432/brewpay_db}
+    username: ${BREWPAY_DB_USER:brewpay}
+    password: ${BREWPAY_DB_PASSWORD:}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
   mvc:
     problemdetails:
       enabled: false
@@ -14,10 +24,3 @@ server:
 logging:
   pattern:
     console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{correlationId:-}] %logger{36} - %msg%n"
-
-# Recorded for the next slice. This slice does not open a connection.
-brewpay:
-  database:
-    url: jdbc:postgresql://localhost:5432/brewpay_db
-    username: ${BREWPAY_DB_USER:brewpay}
-    password: ${BREWPAY_DB_PASSWORD:}
