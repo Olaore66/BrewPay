@@ -2,9 +2,9 @@ spring:
   application:
     name: brewpay
   datasource:
-    url: ${BREWPAY_DB_URL:jdbc:postgresql://localhost:5432/brewpay_db}
-    username: ${BREWPAY_DB_USER:brewpay}
-    password: ${BREWPAY_DB_PASSWORD:}
+    url: ${BREWPAY_DB_URL:${DB_URL:jdbc:postgresql://localhost:5432/brewpay_db}}
+    username: ${BREWPAY_DB_USER:${DB_USERNAME:brewpay}}
+    password: ${BREWPAY_DB_PASSWORD:${DB_PASSWORD:}}
   jpa:
     open-in-view: false
     hibernate:

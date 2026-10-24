@@ -16,7 +16,7 @@ CI runs that command on every push and pull request. The tests start PostgreSQL 
 ./mvnw spring-boot:run
 ```
 
-The process opens PostgreSQL at startup. The default URL is `jdbc:postgresql://localhost:5432/brewpay_db`. Set `BREWPAY_DB_USER` and `BREWPAY_DB_PASSWORD` when the local role is not `brewpay` with an empty password. This repo does not create the database.
+The process opens PostgreSQL at startup. The default URL is `jdbc:postgresql://localhost:5432/brewpay_db`. A gitignored `.env` in this folder may set `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`. `BREWPAY_DB_URL`, `BREWPAY_DB_USER`, and `BREWPAY_DB_PASSWORD` override those. This repo does not create the database.
 
 `GET /api/v1/health` returns `{"status":"UP"}` and sets `X-Correlation-Id`. It does not need a session.
 
