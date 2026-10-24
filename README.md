@@ -1,6 +1,6 @@
 # BrewPay
 
-Merchant financial operations platform. Slice 8 flags a provider mismatch and leaves the ledger unchanged. A timed-out transfer stays `UNKNOWN` when the provider later reports success. A session chooses the organization. One organization still cannot read another's user, account, journal, stored key, collection, transfer, or reconciliation finding.
+Merchant financial operations platform. Slice 9 asks the bank for the name on a destination account and posts no journal. A session chooses the organization. One organization still cannot read another's user, account, journal, stored key, collection, transfer, reconciliation finding, or account name enquiry.
 
 ## Run the checks
 
@@ -55,7 +55,7 @@ The response includes a token once. Send it as `Authorization: Bearer` on later 
 
 `X-Organization-Id` is ignored. The session's organization is the tenant.
 
-Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, use the ledger routes, open a collection account, submit a transfer, or run reconciliation. The audit records organization signup, login, rejected login, logout, user creation, ledger posts, reversals, collection accounts, collection credits, transfer submissions, reconciliation runs, and the denials. The rows are append-only. They do not contain the password, the session token, the webhook secret, the idempotency key, or an amount.
+Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, use the ledger routes, open a collection account, submit a transfer, run reconciliation, or enquire an account name. The audit records organization signup, login, rejected login, logout, user creation, ledger posts, reversals, collection accounts, collection credits, transfer submissions, reconciliation runs, account name enquiries, and the denials. The rows are append-only. They do not contain the password, the session token, the webhook secret, the idempotency key, the destination account number, or an amount.
 
 ## Ledger
 
@@ -119,6 +119,23 @@ The owner starts a run with `POST /api/v1/reconciliation-runs`. There is no requ
 
 A finding is one of `STATUS_MISMATCH`, `AMOUNT_MISMATCH`, `MISSING_ON_LEDGER`, or `MISSING_AT_PROVIDER`. The run does not post a journal, reverse a journal, or change a collection or transfer. When a timed-out transfer is still `UNKNOWN` and the statement later says `SUCCESSFUL`, the finding is `STATUS_MISMATCH` and the transfer stays `UNKNOWN` with no journal. A statement amount that differs from a stored collection leaves that collection and its journal as they were. A successful transfer the statement omits is `MISSING_AT_PROVIDER` and is not reversed. A statement line that matches nothing is `MISSING_ON_LEDGER` and does not post money. A statement that agrees with the stored rows adds no finding. The same mismatch on a later run returns the first finding id and records a new run. A finding id from another organization returns `404` with `Reconciliation finding was not found.` Staff receive `403`.
 
+## Account name enquiry
+
+The owner asks for the name on a destination account. The account number is 10 digits. The bank code is 3 to 6 digits. There is no `Idempotency-Key` and no amount.
+
+```json
+{
+  "destinationAccountNumber": "0123456789",
+  "destinationBankCode": "058"
+}
+```
+
+`POST /api/v1/account-name-enquiries` returns `201` with the provider's `accountName`. The call posts no journal and does not change a transfer. Asking again stores another enquiry. `GET /api/v1/account-name-enquiries` lists this organization's enquiries, oldest first.
+
+When the provider has no such account, the response is `404` with `Account name was not found.` and nothing is stored. When the provider does not answer, the response is `400` with `Provider did not answer.` and nothing is stored. An enquiry id from another organization returns `404` with `Account name enquiry was not found.` Staff receive `403`.
+
+The local fake bank answers `Fake Account` unless it is scripted to return a name, miss, or time out. A merchant request cannot choose that answer.
+
 ## Errors
 
 Every error body has the same four fields:
@@ -143,9 +160,9 @@ Every error body has the same four fields:
 | `access` | Roles and the owner check |
 | `audit` | Append-only audit |
 | `ledger` | Accounts and balanced journals in kobo. Source of truth for money |
-| `payments` | Idempotency, collections, and transfers. Money moves only through the ledger |
+| `payments` | Idempotency, collections, transfers, and account name enquiries. Money moves only through the ledger |
 | `banking` | Provider port |
-| `banking.fake` | Fake bank adapter. Signature checks, fake payloads, and a scripted statement stay here |
+| `banking.fake` | Fake bank adapter. Signature checks, fake payloads, a scripted statement, and a scripted account name stay here |
 | `banking.kolomoni` | Kolomoni adapter only. Empty in this slice |
 | `reconciliation` | Compares the provider statement to collections and transfers. Flags mismatches and leaves the ledger unchanged |
 | `notifications` | Email and SMS |
