@@ -24,6 +24,9 @@ server:
 brewpay:
   session:
     ttl: PT12H
+  banking:
+    fake:
+      webhook-secret: ${BREWPAY_FAKE_BANK_WEBHOOK_SECRET:fake-bank-webhook-secret}
 
 logging:
   pattern:

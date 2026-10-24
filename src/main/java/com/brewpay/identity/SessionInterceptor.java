@@ -58,6 +58,9 @@ public class SessionInterceptor implements HandlerInterceptor {
     if ("POST".equals(method) && "/api/v1/organizations".equals(uri)) {
       return true;
     }
-    return "POST".equals(method) && "/api/v1/sessions".equals(uri);
+    if ("POST".equals(method) && "/api/v1/sessions".equals(uri)) {
+      return true;
+    }
+    return "POST".equals(method) && "/api/v1/webhooks/fake-bank".equals(uri);
   }
 }

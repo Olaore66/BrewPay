@@ -15,5 +15,7 @@ When something breaks, name the rule, then open the package. The test name is th
 | An unbalanced journal is stored, a reversal changes the original lines, or the same journal is reversed twice | A journal is stored only when debits equal credits, and a reversal is a new journal | `ledger` | `LedgerRulesTest`, `LedgerRepositoryContractTest` |
 | Organization A reads organization B's journal or account | Ledger reads include the organization id | `ledger` | `LedgerRulesTest` |
 | The same idempotency key posts two journals, or one organization receives another's stored result | The same key, organization, and action returns the first journal | `payments` | `IdempotencyRulesTest`, `IdempotencyRepositoryContractTest` |
+| A domain package imports the fake bank, or the port imports an adapter | The bank stays behind the port | The importing package, `banking.fake`, `banking.kolomoni` | `PackageRulesTest` |
+| The same webhook credits the merchant twice, or one organization reads another's collection | A paid collection posts one journal, and a duplicate webhook returns that collection | `payments`, `banking.fake` | `CollectionRulesTest`, `CollectionRepositoryContractTest` |
 
-Later slices add rows for duplicate webhooks and provider timeouts. Do not remove a row when its test still exists.
+Later slices add a row for provider timeouts. Do not remove a row when its test still exists.

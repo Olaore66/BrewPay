@@ -1,6 +1,6 @@
 # BrewPay
 
-Merchant financial operations platform. Slice 5 remembers a journal post by its idempotency key. The same key returns the first journal. A session chooses the organization. One organization still cannot read another's user, account, journal, or stored key.
+Merchant financial operations platform. Slice 6 accepts a fake-bank collection webhook. A paid webhook credits the merchant once. The same webhook again returns that collection. A session chooses the organization. One organization still cannot read another's user, account, journal, stored key, or collection.
 
 ## Run the checks
 
@@ -55,7 +55,7 @@ The response includes a token once. Send it as `Authorization: Bearer` on later 
 
 `X-Organization-Id` is ignored. The session's organization is the tenant.
 
-Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, or use the ledger routes. The audit records organization signup, login, rejected login, logout, user creation, ledger posts, reversals, and the denials. The rows are append-only. They do not contain the password, the session token, or an amount.
+Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, use the ledger routes, or open a collection account. The audit records organization signup, login, rejected login, logout, user creation, ledger posts, reversals, collection accounts, collection credits, and the denials. The rows are append-only. They do not contain the password, the session token, the webhook secret, or an amount.
 
 ## Ledger
 
@@ -78,6 +78,20 @@ The owner creates an account, then posts a journal. Amounts are whole kobo. The 
 `POST /api/v1/ledger/accounts` and `POST /api/v1/ledger/journals` return `201`. A journal post sends `Idempotency-Key`. The same key and the same lines return the first journal again. A different body with that key returns `409` with `Idempotency key was already used with a different request.` `GET` lists the session's rows, oldest first. `POST /api/v1/ledger/journals/{id}/reversals` appends a new journal with the directions swapped and sets `reversesJournalId` to the original. The original lines stay as they were. A second reversal of that same journal returns `409` with `Journal is already reversed.` An unbalanced journal returns `400` with `Journal is not balanced.` and stores nothing. The key stays free for a later balanced post.
 
 Account codes are unique inside one organization and are stored in uppercase. The same code may exist in a second organization. A journal or account from another organization returns `404`, the same as an unknown id. `X-Organization-Id` is still ignored. Staff receive `403`.
+
+## Collections
+
+The owner opens a collection account by naming two ledger accounts in that organization. Clearing must be `ASSET`. The merchant account must be `LIABILITY`.
+
+```json
+{ "clearingAccountId": "...", "merchantAccountId": "..." }
+```
+
+`POST /api/v1/collection-accounts` returns `201` and an `externalReference` from the fake bank. `GET /api/v1/collection-accounts` and `GET /api/v1/collections` list that organization's rows, oldest first.
+
+`POST /api/v1/webhooks/fake-bank` is public. The header `X-Fake-Bank-Signature` is the hex HMAC-SHA256 of the raw body. The secret is `BREWPAY_FAKE_BANK_WEBHOOK_SECRET`. The value in this repo is only for the local fake bank. It is not a Kolomoni credential. A bad signature returns `401` with `Webhook signature is invalid.`
+
+A `SUCCESSFUL` body posts one journal: debit the clearing account, credit the merchant account, currency `NGN`, amount `amountKobo`. The response is `201`. Sending that same event again returns the same collection and does not post a second journal. A different amount with the same event returns `409` with `Idempotency key was already used with a different request.` `PENDING`, `FAILED`, and `UNKNOWN` return `200` and store nothing, so a later success with that event can still credit. A collection id from another organization returns `404` with `Collection was not found.`
 
 ## Errors
 
@@ -103,10 +117,11 @@ Every error body has the same four fields:
 | `access` | Roles and the owner check |
 | `audit` | Append-only audit |
 | `ledger` | Accounts and balanced journals in kobo. Source of truth for money |
-| `payments` | Idempotency for journal posts. Later: collections and transfers |
+| `payments` | Idempotency and collections. A collection posts one journal through the ledger |
 | `banking` | Provider port |
-| `banking.kolomoni` | Kolomoni adapter only |
+| `banking.fake` | Fake bank adapter. Signature checks and fake payloads stay here |
+| `banking.kolomoni` | Kolomoni adapter only. Empty in this slice |
 | `reconciliation` | Mismatch detection |
 | `notifications` | Email and SMS |
 
-`ledger` and `payments` must not import `banking.kolomoni`. `PackageRulesTest` fails the build if they do.
+`ledger` and `payments` must not import `banking.kolomoni` or `banking.fake`. `PackageRulesTest` fails the build if they do.

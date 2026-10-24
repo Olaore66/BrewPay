@@ -4,8 +4,8 @@ import com.brewpay.platform.error.ErrorCode;
 import com.brewpay.platform.error.PlatformException;
 
 /**
- * The only permission rule in this slice: the owner adds users, reads the audit, and uses the
- * ledger.
+ * The only permission rule in this slice: the owner adds users, reads the audit, uses the ledger,
+ * and opens collection accounts.
  */
 public final class Permissions {
 

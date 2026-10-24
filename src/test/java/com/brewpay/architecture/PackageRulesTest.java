@@ -27,7 +27,8 @@ class PackageRulesTest {
                 "com.brewpay.access..",
                 "com.brewpay.audit..",
                 "com.brewpay.reconciliation..",
-                "com.brewpay.notifications..")
+                "com.brewpay.notifications..",
+                "com.brewpay.banking.fake..")
             .should()
             .dependOnClassesThat()
             .resideInAPackage(KOLOMONI)
@@ -74,6 +75,41 @@ class PackageRulesTest {
             .dependOnClassesThat()
             .resideInAPackage("com.brewpay.payments..")
             .because("payments posts to the ledger");
+
+    rule.check(productionClasses);
+  }
+
+  @Test
+  void domainPackagesDoNotDependOnTheFakeBank() {
+    ArchRule rule =
+        noClasses()
+            .that()
+            .resideInAnyPackage(
+                "com.brewpay.ledger..",
+                "com.brewpay.payments..",
+                "com.brewpay.identity..",
+                "com.brewpay.access..",
+                "com.brewpay.audit..",
+                "com.brewpay.reconciliation..",
+                "com.brewpay.notifications..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("com.brewpay.banking.fake..")
+            .because("the fake bank is an adapter behind the port");
+
+    rule.check(productionClasses);
+  }
+
+  @Test
+  void providerPortDoesNotDependOnTheFakeBank() {
+    ArchRule rule =
+        noClasses()
+            .that()
+            .resideInAPackage("com.brewpay.banking")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("com.brewpay.banking.fake..")
+            .because("the port is the boundary the adapter implements");
 
     rule.check(productionClasses);
   }

@@ -94,10 +94,16 @@ public class LedgerService {
   public JournalResponse post(PostJournalRequest request) {
     Actor actor =
         ownerOrAuditDenial(AuditAction.JOURNAL_POST_DENIED, AuditTargetType.JOURNAL, null);
+    return postBalanced(actor.organizationId(), actor.userId(), request);
+  }
+
+  /** Posts a balanced journal for an organization. The caller has already chosen the actor. */
+  @Transactional
+  public JournalResponse postBalanced(
+      UUID organizationId, UUID createdBy, PostJournalRequest request) {
     List<JournalLineRequest> requested = request.lines();
     requireBalanced(requested);
     String description = cleanDescription(request.description());
-    UUID organizationId = actor.organizationId();
     for (JournalLineRequest line : requested) {
       requireAccount(organizationId, line.accountId());
     }
@@ -109,12 +115,12 @@ public class LedgerService {
             CURRENCY,
             null,
             clock.instant(),
-            actor.userId());
+            createdBy);
     journals.saveAndFlush(journal);
     List<JournalLine> stored = storeLines(journal, requested);
     auditLog.record(
         organizationId,
-        actor.userId(),
+        createdBy,
         AuditAction.JOURNAL_POSTED,
         AuditTargetType.JOURNAL,
         journal.getId());

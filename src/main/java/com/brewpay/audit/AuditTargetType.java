@@ -5,5 +5,7 @@ public enum AuditTargetType {
   USER,
   AUDIT,
   ACCOUNT,
-  JOURNAL
+  JOURNAL,
+  COLLECTION_ACCOUNT,
+  COLLECTION
 }
