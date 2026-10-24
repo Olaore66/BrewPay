@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.brewpay.payments.IdempotencyKeys;
 import com.brewpay.platform.correlation.CorrelationIds;
 import com.brewpay.platform.tenant.TenantContext;
 import com.jayway.jsonpath.JsonPath;
@@ -17,6 +18,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -64,6 +66,7 @@ class LedgerRulesTest {
             .perform(
                 post("/api/v1/ledger/journals")
                     .header("Authorization", bearer(token))
+                    .header(IdempotencyKeys.HEADER, UUID.randomUUID().toString())
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(journalJson("Till sales", cash, sales, KOBO, KOBO)))
             .andExpect(status().isCreated())
@@ -109,6 +112,7 @@ class LedgerRulesTest {
         .perform(
             post("/api/v1/ledger/journals")
                 .header("Authorization", bearer(token))
+                .header(IdempotencyKeys.HEADER, UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(journalJson("Short", cash, sales, 100L, 90L)))
         .andExpect(status().isBadRequest())
@@ -140,6 +144,7 @@ class LedgerRulesTest {
         .perform(
             post("/api/v1/ledger/journals")
                 .header("Authorization", bearer(token))
+                .header(IdempotencyKeys.HEADER, UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
@@ -278,6 +283,7 @@ class LedgerRulesTest {
         .perform(
             post("/api/v1/ledger/journals")
                 .header("Authorization", bearer(bolaToken))
+                .header(IdempotencyKeys.HEADER, UUID.randomUUID().toString())
                 .header(TenantContext.HEADER, ada.id())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(journalJson("Borrowed", cash, sales, KOBO, KOBO)))
@@ -314,6 +320,7 @@ class LedgerRulesTest {
         .perform(
             post("/api/v1/ledger/journals")
                 .header("Authorization", bearer(staffToken))
+                .header(IdempotencyKeys.HEADER, UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(journalJson("Staff sale", cash, sales, KOBO, KOBO)))
         .andExpect(status().isForbidden())
@@ -410,6 +417,7 @@ class LedgerRulesTest {
             .perform(
                 post("/api/v1/ledger/journals")
                     .header("Authorization", bearer(token))
+                    .header(IdempotencyKeys.HEADER, UUID.randomUUID().toString())
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(journalJson(description, debitAccount, creditAccount, debit, credit)))
             .andExpect(status().isCreated())

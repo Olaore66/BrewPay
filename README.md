@@ -1,6 +1,6 @@
 # BrewPay
 
-Merchant financial operations platform. Slice 4 stores a balanced journal in kobo and reverses it with a new journal. A session chooses the organization. One organization still cannot read another's user, account, or journal.
+Merchant financial operations platform. Slice 5 remembers a journal post by its idempotency key. The same key returns the first journal. A session chooses the organization. One organization still cannot read another's user, account, journal, or stored key.
 
 ## Run the checks
 
@@ -75,7 +75,7 @@ The owner creates an account, then posts a journal. Amounts are whole kobo. The 
 }
 ```
 
-`POST /api/v1/ledger/accounts` and `POST /api/v1/ledger/journals` return `201`. `GET` lists the session's rows, oldest first. `POST /api/v1/ledger/journals/{id}/reversals` appends a new journal with the directions swapped and sets `reversesJournalId` to the original. The original lines stay as they were. A second reversal of that same journal returns `409` with `Journal is already reversed.` An unbalanced journal returns `400` with `Journal is not balanced.` and stores nothing.
+`POST /api/v1/ledger/accounts` and `POST /api/v1/ledger/journals` return `201`. A journal post sends `Idempotency-Key`. The same key and the same lines return the first journal again. A different body with that key returns `409` with `Idempotency key was already used with a different request.` `GET` lists the session's rows, oldest first. `POST /api/v1/ledger/journals/{id}/reversals` appends a new journal with the directions swapped and sets `reversesJournalId` to the original. The original lines stay as they were. A second reversal of that same journal returns `409` with `Journal is already reversed.` An unbalanced journal returns `400` with `Journal is not balanced.` and stores nothing. The key stays free for a later balanced post.
 
 Account codes are unique inside one organization and are stored in uppercase. The same code may exist in a second organization. A journal or account from another organization returns `404`, the same as an unknown id. `X-Organization-Id` is still ignored. Staff receive `403`.
 
@@ -103,7 +103,7 @@ Every error body has the same four fields:
 | `access` | Roles and the owner check |
 | `audit` | Append-only audit |
 | `ledger` | Accounts and balanced journals in kobo. Source of truth for money |
-| `payments` | Collections, transfers, idempotency |
+| `payments` | Idempotency for journal posts. Later: collections and transfers |
 | `banking` | Provider port |
 | `banking.kolomoni` | Kolomoni adapter only |
 | `reconciliation` | Mismatch detection |

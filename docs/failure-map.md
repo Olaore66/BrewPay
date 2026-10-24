@@ -14,5 +14,6 @@ When something breaks, name the rule, then open the package. The test name is th
 | An audit row is missing, editable, or contains a password or session secret | Audit is append-only and records these actions | `audit` | `LoginSessionTest`, `AuditRepositoryContractTest` |
 | An unbalanced journal is stored, a reversal changes the original lines, or the same journal is reversed twice | A journal is stored only when debits equal credits, and a reversal is a new journal | `ledger` | `LedgerRulesTest`, `LedgerRepositoryContractTest` |
 | Organization A reads organization B's journal or account | Ledger reads include the organization id | `ledger` | `LedgerRulesTest` |
+| The same idempotency key posts two journals, or one organization receives another's stored result | The same key, organization, and action returns the first journal | `payments` | `IdempotencyRulesTest`, `IdempotencyRepositoryContractTest` |
 
 Later slices add rows for duplicate webhooks and provider timeouts. Do not remove a row when its test still exists.

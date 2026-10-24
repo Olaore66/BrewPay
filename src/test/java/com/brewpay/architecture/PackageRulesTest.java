@@ -63,4 +63,18 @@ class PackageRulesTest {
 
     rule.check(productionClasses);
   }
+
+  @Test
+  void ledgerDoesNotDependOnPayments() {
+    ArchRule rule =
+        noClasses()
+            .that()
+            .resideInAPackage("com.brewpay.ledger..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("com.brewpay.payments..")
+            .because("payments posts to the ledger");
+
+    rule.check(productionClasses);
+  }
 }
