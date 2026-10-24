@@ -4,7 +4,7 @@ This file is the fence for every AI session. Read it before editing.
 
 ## This slice
 
-Slice 6 is a fake bank behind the collection port. The owner opens a collection account on an asset clearing account and a liability merchant account. A signed successful webhook posts one balanced journal in kobo. The same webhook again returns the first collection and does not post a second credit. Slices 1 to 5 still hold. Do not add transfers, reconciliation, or a Kolomoni client in this slice.
+Slice 7 records a payout. When the provider does not answer, the transfer stays `UNKNOWN` and no journal is posted. The same key returns that transfer and does not submit it again. A successful answer posts one balanced journal. Slices 1 to 6 still hold. Do not add reconciliation or a Kolomoni client in this slice.
 
 ## Rules that already have tests
 
@@ -20,16 +20,17 @@ Slice 6 is a fake bank behind the collection port. The owner opens a collection 
 - Ledger reads and writes use the organization id on the session. Another organization's journal or account is the same not-found as an unknown one. Only the owner can use the ledger routes. `LedgerAccountRepository`, `JournalRepository`, and `JournalLineRepository` have no finder that omits the organization id and no delete method. The ledger package does not import `identity` or `payments`.
 - `POST /api/v1/ledger/journals` requires `Idempotency-Key`. The same key, organization, and action returns the first journal and does not post a second one. The same key with a different request returns `Idempotency key was already used with a different request.` A rejected post does not consume the key. Another organization's copy of the key is a separate request. `IdempotencyRepository` has no finder that omits the organization id and no delete method.
 - A successful collection webhook debits the clearing account and credits the merchant account once. The same provider event returns that collection and does not post again. The same event with a different amount returns `Idempotency key was already used with a different request.` A pending, failed, or unknown payment does not post a journal and does not consume the key. A bad signature is rejected. Another organization's collection is the same not-found as an unknown one. `CollectionRepository` has no finder that omits the organization id and no delete method. `findByExternalReference` is the only collection-account lookup that omits the organization id, and only a verified webhook uses it.
+- A transfer whose provider times out is stored as `UNKNOWN`. No journal is posted. The same key, organization, and action returns that transfer and does not submit it again. The same key with a different request returns `Idempotency key was already used with a different request.` A rejected transfer does not consume the key. A successful provider answer posts one journal: debit the merchant liability, credit the clearing asset. A failed answer stores `FAILED` and posts nothing. Another organization's transfer is the same not-found as an unknown one. `TransferRepository` has no finder that omits the organization id and no delete method.
 
 ## How to change the code
 
 - One rule per change. Add or update the test first.
 - Spotless is part of `./mvnw verify`. Format with `./mvnw spotless:apply`.
-- Do not edit a merged Flyway migration. `V1__organization_and_user.sql`, `V2__session_and_audit.sql`, `V3__ledger.sql`, `V4__idempotency.sql`, and `V5__collection.sql` stay as they are. Add `V6__...` for the next change.
+- Do not edit a merged Flyway migration. `V1__organization_and_user.sql`, `V2__session_and_audit.sql`, `V3__ledger.sql`, `V4__idempotency.sql`, `V5__collection.sql`, and `V6__transfer.sql` stay as they are. Add `V7__...` for the next change.
 - Fake bank payloads stay in `banking.fake`. Kolomoni payloads stay in `banking.kolomoni` when that adapter exists. Domain code calls the port.
 - Do not log secrets, passwords, session tokens, BVNs, or raw provider payloads.
 - Child reads go through `UserRepository` methods that take `organizationId`. Do not add `findById`, `findAll`, or extend `CrudRepository` / `JpaRepository` on that interface.
-- Do not extend `CrudRepository` on `SessionRepository`, `AuditRepository`, `LedgerAccountRepository`, `JournalRepository`, `JournalLineRepository`, `IdempotencyRepository`, `CollectionAccountRepository`, or `CollectionRepository`.
+- Do not extend `CrudRepository` on `SessionRepository`, `AuditRepository`, `LedgerAccountRepository`, `JournalRepository`, `JournalLineRepository`, `IdempotencyRepository`, `CollectionAccountRepository`, `CollectionRepository`, or `TransferRepository`.
 
 ## Session
 
@@ -45,10 +46,16 @@ The key is stored with the organization and the action `JOURNAL_POST` only after
 
 A collection uses the same store with action `COLLECTION_RECEIVED`. The key is the provider event id. The row is written in the same transaction as the journal and the collection. A pending, failed, or unknown webhook does not write that row.
 
+A transfer uses action `TRANSFER_SUBMIT`. The row is written for `UNKNOWN`, `FAILED`, and `SUCCESSFUL`, because the provider was already asked. A validation failure and a staff denial do not write it. The response and the audit do not echo the key.
+
 ## Collections
 
 The owner opens a collection account with an asset clearing account and a liability merchant account. The fake bank assigns the external reference. A `SUCCESSFUL` webhook posts one journal: debit clearing, credit merchant, currency `NGN`, amount in kobo. The journal's `created_by` is the owner who opened the account. The same event again returns the first collection. Staff cannot open a collection account. A collection id from another organization returns `Collection was not found.`
 
+## Transfers
+
+The owner submits a transfer with `Idempotency-Key`, an asset clearing account, a liability merchant account, an amount in kobo, a 10-digit destination account number, and a 3-to-6-digit bank code. The provider is asked once for that key. A timeout is stored as `UNKNOWN` with no provider reference and no journal. The same request returns that row. A confirmed success debits the merchant liability and credits the clearing asset. A confirmed failure stores `FAILED` and posts nothing. Staff cannot submit a transfer. A transfer id from another organization returns `Transfer was not found.`
+
 ## Local database
 
-The application connects to `jdbc:postgresql://localhost:5432/brewpay_db` unless `BREWPAY_DB_URL` is set. The user is `BREWPAY_DB_USER` (default `brewpay`) and the password is `BREWPAY_DB_PASSWORD` (default empty). This repo does not create `brewpay_db`. `./mvnw verify` does not need it: the tests start PostgreSQL 16 in Testcontainers. A database that already applied `V1` and has user rows must be recreated before `V2`, because `V2` adds required password and role columns. `V3` adds the ledger tables on top of `V2`. `V4` adds the idempotency table on top of `V3`. `V5` adds the collection tables on top of `V4`. The fake webhook secret is `BREWPAY_FAKE_BANK_WEBHOOK_SECRET`. The default in this file is only for the local fake bank. It is not a Kolomoni credential.
+The application connects to `jdbc:postgresql://localhost:5432/brewpay_db` unless `BREWPAY_DB_URL` is set. The user is `BREWPAY_DB_USER` (default `brewpay`) and the password is `BREWPAY_DB_PASSWORD` (default empty). This repo does not create `brewpay_db`. `./mvnw verify` does not need it: the tests start PostgreSQL 16 in Testcontainers. A database that already applied `V1` and has user rows must be recreated before `V2`, because `V2` adds required password and role columns. `V3` adds the ledger tables on top of `V2`. `V4` adds the idempotency table on top of `V3`. `V5` adds the collection tables on top of `V4`. `V6` adds the transfer table on top of `V5`. The fake webhook secret is `BREWPAY_FAKE_BANK_WEBHOOK_SECRET`. The default in this file is only for the local fake bank. It is not a Kolomoni credential.

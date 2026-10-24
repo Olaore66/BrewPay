@@ -1,6 +1,6 @@
 # BrewPay
 
-Merchant financial operations platform. Slice 6 accepts a fake-bank collection webhook. A paid webhook credits the merchant once. The same webhook again returns that collection. A session chooses the organization. One organization still cannot read another's user, account, journal, stored key, or collection.
+Merchant financial operations platform. Slice 7 records a payout. A provider timeout stays `UNKNOWN` and does not move money. The same key returns that transfer. A session chooses the organization. One organization still cannot read another's user, account, journal, stored key, collection, or transfer.
 
 ## Run the checks
 
@@ -55,7 +55,7 @@ The response includes a token once. Send it as `Authorization: Bearer` on later 
 
 `X-Organization-Id` is ignored. The session's organization is the tenant.
 
-Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, use the ledger routes, or open a collection account. The audit records organization signup, login, rejected login, logout, user creation, ledger posts, reversals, collection accounts, collection credits, and the denials. The rows are append-only. They do not contain the password, the session token, the webhook secret, or an amount.
+Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, use the ledger routes, open a collection account, or submit a transfer. The audit records organization signup, login, rejected login, logout, user creation, ledger posts, reversals, collection accounts, collection credits, transfer submissions, and the denials. The rows are append-only. They do not contain the password, the session token, the webhook secret, the idempotency key, or an amount.
 
 ## Ledger
 
@@ -93,6 +93,26 @@ The owner opens a collection account by naming two ledger accounts in that organ
 
 A `SUCCESSFUL` body posts one journal: debit the clearing account, credit the merchant account, currency `NGN`, amount `amountKobo`. The response is `201`. Sending that same event again returns the same collection and does not post a second journal. A different amount with the same event returns `409` with `Idempotency key was already used with a different request.` `PENDING`, `FAILED`, and `UNKNOWN` return `200` and store nothing, so a later success with that event can still credit. A collection id from another organization returns `404` with `Collection was not found.`
 
+## Transfers
+
+The owner submits a payout. Clearing must be `ASSET`. The merchant account must be `LIABILITY`. The destination account number is 10 digits. The bank code is 3 to 6 digits. Amounts are whole kobo. Send `Idempotency-Key`.
+
+```json
+{
+  "clearingAccountId": "...",
+  "merchantAccountId": "...",
+  "amountKobo": 250000,
+  "destinationAccountNumber": "0123456789",
+  "destinationBankCode": "058"
+}
+```
+
+`POST /api/v1/transfers` returns `201`. When the provider does not answer, `status` is `UNKNOWN`, `providerReference` is null, and `journalId` is null. The ledger is unchanged. Sending that same key and body again returns the same transfer and does not ask the provider again. A different amount with that key returns `409` with `Idempotency key was already used with a different request.`
+
+When the provider confirms success, the response is `SUCCESSFUL` and one journal is posted: debit the merchant liability, credit the clearing asset, currency `NGN`. When the provider confirms failure, the status is `FAILED` and no journal is posted. A validation failure and a staff denial do not consume the key. A transfer id from another organization returns `404` with `Transfer was not found.`
+
+The local fake bank answers `SUCCESSFUL` unless it is scripted to time out or fail. A merchant request cannot choose that outcome.
+
 ## Errors
 
 Every error body has the same four fields:
@@ -117,7 +137,7 @@ Every error body has the same four fields:
 | `access` | Roles and the owner check |
 | `audit` | Append-only audit |
 | `ledger` | Accounts and balanced journals in kobo. Source of truth for money |
-| `payments` | Idempotency and collections. A collection posts one journal through the ledger |
+| `payments` | Idempotency, collections, and transfers. Money moves only through the ledger |
 | `banking` | Provider port |
 | `banking.fake` | Fake bank adapter. Signature checks and fake payloads stay here |
 | `banking.kolomoni` | Kolomoni adapter only. Empty in this slice |

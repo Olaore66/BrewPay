@@ -1,2 +1,2 @@
-/** Collections and idempotency. A collection posts one journal through the ledger. */
+/** Collections, transfers, and idempotency. Money moves only through the ledger. */
 package com.brewpay.payments;

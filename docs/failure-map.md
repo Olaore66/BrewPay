@@ -17,5 +17,6 @@ When something breaks, name the rule, then open the package. The test name is th
 | The same idempotency key posts two journals, or one organization receives another's stored result | The same key, organization, and action returns the first journal | `payments` | `IdempotencyRulesTest`, `IdempotencyRepositoryContractTest` |
 | A domain package imports the fake bank, or the port imports an adapter | The bank stays behind the port | The importing package, `banking.fake`, `banking.kolomoni` | `PackageRulesTest` |
 | The same webhook credits the merchant twice, or one organization reads another's collection | A paid collection posts one journal, and a duplicate webhook returns that collection | `payments`, `banking.fake` | `CollectionRulesTest`, `CollectionRepositoryContractTest` |
+| A transfer timeout is stored as success or failure, or the same key submits it twice | A transfer timeout stays UNKNOWN and does not move money | `payments`, `banking.fake` | `TransferRulesTest`, `TransferRepositoryContractTest` |
 
-Later slices add a row for provider timeouts. Do not remove a row when its test still exists.
+Later slices add a row for reconciliation mismatches. Do not remove a row when its test still exists.
