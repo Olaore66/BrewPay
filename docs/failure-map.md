@@ -20,5 +20,6 @@ When something breaks, name the rule, then open the package. The test name is th
 | A transfer timeout is stored as success or failure, or the same key submits it twice | A transfer timeout stays UNKNOWN and does not move money | `payments`, `banking.fake` | `TransferRulesTest`, `TransferRepositoryContractTest` |
 | A reconciliation run changes a journal, collection, or transfer, or flags the same mismatch twice | A reconciliation run flags a mismatch and does not rewrite history | `reconciliation` | `ReconciliationRulesTest`, `ReconciliationRepositoryContractTest` |
 | An account name enquiry posts a journal, stores a miss, or one organization reads another's enquiry | An account name enquiry stores a provider name and does not move money | `payments`, `banking.fake` | `NameEnquiryRulesTest`, `NameEnquiryRepositoryContractTest` |
+| A beneficiary posts a journal, stores a miss or a timeout, saves the same account twice, or one organization reads another's beneficiary | A beneficiary stores one provider name per account and does not move money | `payments`, `banking.fake` | `BeneficiaryRulesTest`, `BeneficiaryRepositoryContractTest` |
 
 Later slices add the Kolomoni adapter. Do not remove a row when its test still exists.

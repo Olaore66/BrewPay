@@ -1,6 +1,6 @@
 # BrewPay
 
-Merchant financial operations platform. Slice 9 asks the bank for the name on a destination account and posts no journal. A session chooses the organization. One organization still cannot read another's user, account, journal, stored key, collection, transfer, reconciliation finding, or account name enquiry.
+Merchant financial operations platform. Slice 10 saves a beneficiary from the bank's account name and posts no journal. The same account is stored once. A session chooses the organization. One organization still cannot read another's user, account, journal, stored key, collection, transfer, reconciliation finding, account name enquiry, or beneficiary.
 
 ## Run the checks
 
@@ -55,7 +55,7 @@ The response includes a token once. Send it as `Authorization: Bearer` on later 
 
 `X-Organization-Id` is ignored. The session's organization is the tenant.
 
-Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, use the ledger routes, open a collection account, submit a transfer, run reconciliation, or enquire an account name. The audit records organization signup, login, rejected login, logout, user creation, ledger posts, reversals, collection accounts, collection credits, transfer submissions, reconciliation runs, account name enquiries, and the denials. The rows are append-only. They do not contain the password, the session token, the webhook secret, the idempotency key, the destination account number, or an amount.
+Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, use the ledger routes, open a collection account, submit a transfer, run reconciliation, enquire an account name, or save a beneficiary. The audit records organization signup, login, rejected login, logout, user creation, ledger posts, reversals, collection accounts, collection credits, transfer submissions, reconciliation runs, account name enquiries, beneficiaries, and the denials. The rows are append-only. They do not contain the password, the session token, the webhook secret, the idempotency key, the destination account number, or an amount.
 
 ## Ledger
 
@@ -136,6 +136,23 @@ When the provider has no such account, the response is `404` with `Account name 
 
 The local fake bank answers `Fake Account` unless it is scripted to return a name, miss, or time out. A merchant request cannot choose that answer.
 
+## Beneficiaries
+
+The owner saves a destination account. The account number is 10 digits. The bank code is 3 to 6 digits. There is no nickname and no `Idempotency-Key`.
+
+```json
+{
+  "destinationAccountNumber": "0123456789",
+  "destinationBankCode": "058"
+}
+```
+
+`POST /api/v1/beneficiaries` returns `201` with the provider's `accountName`. The call posts no journal, stores no account name enquiry, and does not submit a transfer. Saving the same account and bank code again returns the first beneficiary and does not ask the provider again. The stored name stays as it was. A different bank code is a different beneficiary. `GET /api/v1/beneficiaries` lists this organization's beneficiaries, oldest first.
+
+When the provider has no such account, the response is `404` with `Account name was not found.` and nothing is stored. When the provider does not answer, the response is `400` with `Provider did not answer.` and nothing is stored. A beneficiary id from another organization returns `404` with `Beneficiary was not found.` Another organization may save the same account and receives its own row. Staff receive `403`.
+
+The local fake bank answers `Fake Account` unless it is scripted to return a name, miss, or time out. A merchant request cannot choose that answer.
+
 ## Errors
 
 Every error body has the same four fields:
@@ -160,7 +177,7 @@ Every error body has the same four fields:
 | `access` | Roles and the owner check |
 | `audit` | Append-only audit |
 | `ledger` | Accounts and balanced journals in kobo. Source of truth for money |
-| `payments` | Idempotency, collections, transfers, and account name enquiries. Money moves only through the ledger |
+| `payments` | Idempotency, collections, transfers, account name enquiries, and beneficiaries. Money moves only through the ledger |
 | `banking` | Provider port |
 | `banking.fake` | Fake bank adapter. Signature checks, fake payloads, a scripted statement, and a scripted account name stay here |
 | `banking.kolomoni` | Kolomoni adapter only. Empty in this slice |
