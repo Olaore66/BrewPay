@@ -1,6 +1,6 @@
 # BrewPay
 
-Merchant financial operations platform. Slice 3 adds login, sessions, an owner permission check, and an audit of those actions. A session chooses the organization. Slice 2 still keeps one organization from reading another's user.
+Merchant financial operations platform. Slice 4 stores a balanced journal in kobo and reverses it with a new journal. A session chooses the organization. One organization still cannot read another's user, account, or journal.
 
 ## Run the checks
 
@@ -55,7 +55,29 @@ The response includes a token once. Send it as `Authorization: Bearer` on later 
 
 `X-Organization-Id` is ignored. The session's organization is the tenant.
 
-Staff can read users in that organization. Only the owner can add a user or call `GET /api/v1/audit-events`. The audit records organization signup, login, rejected login, logout, user creation, and the two denials. The rows are append-only. They do not contain the password or the session token.
+Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, or use the ledger routes. The audit records organization signup, login, rejected login, logout, user creation, ledger posts, reversals, and the denials. The rows are append-only. They do not contain the password, the session token, or an amount.
+
+## Ledger
+
+The owner creates an account, then posts a journal. Amounts are whole kobo. The server stores the currency as `NGN`.
+
+```json
+{ "code": "cash", "name": "Cash", "type": "ASSET" }
+```
+
+```json
+{
+  "description": "Till sales",
+  "lines": [
+    { "accountId": "...", "direction": "DEBIT", "amountKobo": 150000 },
+    { "accountId": "...", "direction": "CREDIT", "amountKobo": 150000 }
+  ]
+}
+```
+
+`POST /api/v1/ledger/accounts` and `POST /api/v1/ledger/journals` return `201`. `GET` lists the session's rows, oldest first. `POST /api/v1/ledger/journals/{id}/reversals` appends a new journal with the directions swapped and sets `reversesJournalId` to the original. The original lines stay as they were. A second reversal of that same journal returns `409` with `Journal is already reversed.` An unbalanced journal returns `400` with `Journal is not balanced.` and stores nothing.
+
+Account codes are unique inside one organization and are stored in uppercase. The same code may exist in a second organization. A journal or account from another organization returns `404`, the same as an unknown id. `X-Organization-Id` is still ignored. Staff receive `403`.
 
 ## Errors
 
@@ -80,7 +102,7 @@ Every error body has the same four fields:
 | `identity` | Organizations, staff, sessions |
 | `access` | Roles and the owner check |
 | `audit` | Append-only audit |
-| `ledger` | Journals. Source of truth for money |
+| `ledger` | Accounts and balanced journals in kobo. Source of truth for money |
 | `payments` | Collections, transfers, idempotency |
 | `banking` | Provider port |
 | `banking.kolomoni` | Kolomoni adapter only |

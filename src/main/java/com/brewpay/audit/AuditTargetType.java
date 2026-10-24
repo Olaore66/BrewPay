@@ -3,5 +3,7 @@ package com.brewpay.audit;
 public enum AuditTargetType {
   SESSION,
   USER,
-  AUDIT
+  AUDIT,
+  ACCOUNT,
+  JOURNAL
 }

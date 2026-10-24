@@ -12,5 +12,7 @@ When something breaks, name the rule, then open the package. The test name is th
 | Wrong password, unknown email, and unknown organization return different messages | Login failure has one message | `identity` | `LoginSessionTest` |
 | Staff adds a user, or staff reads the audit | Only the owner can add a user and read the audit | `access`, `identity`, `audit` | `LoginSessionTest` |
 | An audit row is missing, editable, or contains a password or session secret | Audit is append-only and records these actions | `audit` | `LoginSessionTest`, `AuditRepositoryContractTest` |
+| An unbalanced journal is stored, a reversal changes the original lines, or the same journal is reversed twice | A journal is stored only when debits equal credits, and a reversal is a new journal | `ledger` | `LedgerRulesTest`, `LedgerRepositoryContractTest` |
+| Organization A reads organization B's journal or account | Ledger reads include the organization id | `ledger` | `LedgerRulesTest` |
 
-Later slices add rows for unbalanced journals, duplicate webhooks, and provider timeouts. Do not remove a row when its test still exists.
+Later slices add rows for duplicate webhooks and provider timeouts. Do not remove a row when its test still exists.

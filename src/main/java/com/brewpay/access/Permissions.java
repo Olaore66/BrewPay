@@ -3,7 +3,10 @@ package com.brewpay.access;
 import com.brewpay.platform.error.ErrorCode;
 import com.brewpay.platform.error.PlatformException;
 
-/** The only permission rule in this slice: the owner adds users and reads the audit. */
+/**
+ * The only permission rule in this slice: the owner adds users, reads the audit, and uses the
+ * ledger.
+ */
 public final class Permissions {
 
   private Permissions() {}

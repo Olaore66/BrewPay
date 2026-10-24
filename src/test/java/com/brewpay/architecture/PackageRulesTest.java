@@ -49,4 +49,18 @@ class PackageRulesTest {
 
     rule.check(productionClasses);
   }
+
+  @Test
+  void ledgerDoesNotDependOnIdentity() {
+    ArchRule rule =
+        noClasses()
+            .that()
+            .resideInAPackage("com.brewpay.ledger..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("com.brewpay.identity..")
+            .because("the session already carries the user and the organization");
+
+    rule.check(productionClasses);
+  }
 }
