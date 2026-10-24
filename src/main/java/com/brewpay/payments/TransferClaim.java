@@ -23,7 +23,7 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class TransferClaim {
 
-  static final String ACTION = "TRANSFER_SUBMIT";
+  public static final String ACTION = "TRANSFER_SUBMIT";
   private static final int CREATED = 201;
 
   private final LedgerService ledger;

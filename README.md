@@ -1,6 +1,6 @@
 # BrewPay
 
-Merchant financial operations platform. Slice 7 records a payout. A provider timeout stays `UNKNOWN` and does not move money. The same key returns that transfer. A session chooses the organization. One organization still cannot read another's user, account, journal, stored key, collection, or transfer.
+Merchant financial operations platform. Slice 8 flags a provider mismatch and leaves the ledger unchanged. A timed-out transfer stays `UNKNOWN` when the provider later reports success. A session chooses the organization. One organization still cannot read another's user, account, journal, stored key, collection, transfer, or reconciliation finding.
 
 ## Run the checks
 
@@ -55,7 +55,7 @@ The response includes a token once. Send it as `Authorization: Bearer` on later 
 
 `X-Organization-Id` is ignored. The session's organization is the tenant.
 
-Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, use the ledger routes, open a collection account, or submit a transfer. The audit records organization signup, login, rejected login, logout, user creation, ledger posts, reversals, collection accounts, collection credits, transfer submissions, and the denials. The rows are append-only. They do not contain the password, the session token, the webhook secret, the idempotency key, or an amount.
+Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, use the ledger routes, open a collection account, submit a transfer, or run reconciliation. The audit records organization signup, login, rejected login, logout, user creation, ledger posts, reversals, collection accounts, collection credits, transfer submissions, reconciliation runs, and the denials. The rows are append-only. They do not contain the password, the session token, the webhook secret, the idempotency key, or an amount.
 
 ## Ledger
 
@@ -113,6 +113,12 @@ When the provider confirms success, the response is `SUCCESSFUL` and one journal
 
 The local fake bank answers `SUCCESSFUL` unless it is scripted to time out or fail. A merchant request cannot choose that outcome.
 
+## Reconciliation
+
+The owner starts a run with `POST /api/v1/reconciliation-runs`. There is no request body. The statement comes from the bank port. The local fake statement starts empty, and a merchant request cannot add lines to it. The response is `201` and lists the findings for that look. `GET /api/v1/reconciliation-findings` lists this organization's findings, oldest first.
+
+A finding is one of `STATUS_MISMATCH`, `AMOUNT_MISMATCH`, `MISSING_ON_LEDGER`, or `MISSING_AT_PROVIDER`. The run does not post a journal, reverse a journal, or change a collection or transfer. When a timed-out transfer is still `UNKNOWN` and the statement later says `SUCCESSFUL`, the finding is `STATUS_MISMATCH` and the transfer stays `UNKNOWN` with no journal. A statement amount that differs from a stored collection leaves that collection and its journal as they were. A successful transfer the statement omits is `MISSING_AT_PROVIDER` and is not reversed. A statement line that matches nothing is `MISSING_ON_LEDGER` and does not post money. A statement that agrees with the stored rows adds no finding. The same mismatch on a later run returns the first finding id and records a new run. A finding id from another organization returns `404` with `Reconciliation finding was not found.` Staff receive `403`.
+
 ## Errors
 
 Every error body has the same four fields:
@@ -139,9 +145,9 @@ Every error body has the same four fields:
 | `ledger` | Accounts and balanced journals in kobo. Source of truth for money |
 | `payments` | Idempotency, collections, and transfers. Money moves only through the ledger |
 | `banking` | Provider port |
-| `banking.fake` | Fake bank adapter. Signature checks and fake payloads stay here |
+| `banking.fake` | Fake bank adapter. Signature checks, fake payloads, and a scripted statement stay here |
 | `banking.kolomoni` | Kolomoni adapter only. Empty in this slice |
-| `reconciliation` | Mismatch detection |
+| `reconciliation` | Compares the provider statement to collections and transfers. Flags mismatches and leaves the ledger unchanged |
 | `notifications` | Email and SMS |
 
-`ledger` and `payments` must not import `banking.kolomoni` or `banking.fake`. `PackageRulesTest` fails the build if they do.
+`ledger`, `payments`, and `reconciliation` must not import `banking.kolomoni` or `banking.fake`. `PackageRulesTest` fails the build if they do.
