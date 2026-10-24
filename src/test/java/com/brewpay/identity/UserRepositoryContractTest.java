@@ -31,9 +31,11 @@ class UserRepositoryContractTest {
     assertEquals(
         Set.of(
             "save",
+            "saveAndFlush",
             "findByIdAndOrganizationId",
             "findByOrganizationIdOrderByCreatedAtAsc",
-            "existsByOrganizationIdAndEmail"),
+            "existsByOrganizationIdAndEmail",
+            "findByOrganizationIdAndEmail"),
         methods);
   }
 }

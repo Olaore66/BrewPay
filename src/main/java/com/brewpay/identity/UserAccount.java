@@ -1,5 +1,6 @@
 package com.brewpay.identity;
 
+import com.brewpay.access.Role;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -21,11 +22,18 @@ public class UserAccount {
   @Column(nullable = false)
   private String email;
 
+  @Column(name = "password_hash", nullable = false, length = 100)
+  private String passwordHash;
+
   @Column(name = "first_name", nullable = false)
   private String firstName;
 
   @Column(name = "last_name", nullable = false)
   private String lastName;
+
+  @Enumerated(EnumType.STRING)
+  @Column(nullable = false, length = 32)
+  private Role role;
 
   @Enumerated(EnumType.STRING)
   @Column(nullable = false)
@@ -40,15 +48,19 @@ public class UserAccount {
       UUID id,
       UUID organizationId,
       String email,
+      String passwordHash,
       String firstName,
       String lastName,
+      Role role,
       UserStatus status,
       Instant createdAt) {
     this.id = id;
     this.organizationId = organizationId;
     this.email = email;
+    this.passwordHash = passwordHash;
     this.firstName = firstName;
     this.lastName = lastName;
+    this.role = role;
     this.status = status;
     this.createdAt = createdAt;
   }
@@ -65,12 +77,20 @@ public class UserAccount {
     return email;
   }
 
+  String getPasswordHash() {
+    return passwordHash;
+  }
+
   public String getFirstName() {
     return firstName;
   }
 
   public String getLastName() {
     return lastName;
+  }
+
+  public Role getRole() {
+    return role;
   }
 
   public UserStatus getStatus() {

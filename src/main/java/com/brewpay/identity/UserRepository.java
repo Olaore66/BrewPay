@@ -12,9 +12,13 @@ public interface UserRepository extends Repository<UserAccount, UUID> {
 
   UserAccount save(UserAccount user);
 
+  UserAccount saveAndFlush(UserAccount user);
+
   Optional<UserAccount> findByIdAndOrganizationId(UUID id, UUID organizationId);
 
   List<UserAccount> findByOrganizationIdOrderByCreatedAtAsc(UUID organizationId);
 
   boolean existsByOrganizationIdAndEmail(UUID organizationId, String email);
+
+  Optional<UserAccount> findByOrganizationIdAndEmail(UUID organizationId, String email);
 }

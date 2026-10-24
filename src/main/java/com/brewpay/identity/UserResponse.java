@@ -3,7 +3,13 @@ package com.brewpay.identity;
 import java.util.UUID;
 
 public record UserResponse(
-    UUID id, UUID organizationId, String firstName, String lastName, String email, String status) {
+    UUID id,
+    UUID organizationId,
+    String firstName,
+    String lastName,
+    String email,
+    String status,
+    String role) {
 
   static UserResponse from(UserAccount user) {
     return new UserResponse(
@@ -12,6 +18,7 @@ public record UserResponse(
         user.getFirstName(),
         user.getLastName(),
         user.getEmail(),
-        user.getStatus().name());
+        user.getStatus().name(),
+        user.getRole().name());
   }
 }

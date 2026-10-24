@@ -43,6 +43,8 @@ class OrganizationIsolationTest {
     postgres.start();
   }
 
+  private static final String PASSWORD = "password-1";
+
   @Autowired private MockMvc mockMvc;
 
   @Test
@@ -51,13 +53,16 @@ class OrganizationIsolationTest {
     CreatedOrg bola = createOrganization("Bola Stores", "bola@b.example");
 
     mockMvc
-        .perform(get("/api/v1/users/" + ada.ownerId()).header(TenantContext.HEADER, ada.id()))
+        .perform(get("/api/v1/users/" + ada.ownerId()).header("Authorization", bearer(ada.token())))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.email").value("ada@a.example"))
         .andExpect(jsonPath("$.organizationId").value(ada.id()));
 
     mockMvc
-        .perform(get("/api/v1/users/" + bola.ownerId()).header(TenantContext.HEADER, ada.id()))
+        .perform(
+            get("/api/v1/users/" + bola.ownerId())
+                .header("Authorization", bearer(ada.token()))
+                .header(TenantContext.HEADER, bola.id()))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("NOT_FOUND"))
         .andExpect(jsonPath("$.message").value("User was not found."))
@@ -72,7 +77,8 @@ class OrganizationIsolationTest {
     CreatedOrg ada = createOrganization("Ada Unknown", "ada-unknown@a.example");
 
     mockMvc
-        .perform(get("/api/v1/users/" + UUID.randomUUID()).header(TenantContext.HEADER, ada.id()))
+        .perform(
+            get("/api/v1/users/" + UUID.randomUUID()).header("Authorization", bearer(ada.token())))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("NOT_FOUND"))
         .andExpect(jsonPath("$.message").value("User was not found."));
@@ -82,17 +88,17 @@ class OrganizationIsolationTest {
   void listReturnsOnlyTheCallerOrganizationInCreatedOrder() throws Exception {
     CreatedOrg ada = createOrganization("Ada List", "ada-list@a.example");
     CreatedOrg bola = createOrganization("Bola List", "bola-list@b.example");
-    String chiId = createUser(ada.id(), "Chi", "chi-list@a.example");
+    String chiId = createUser(ada.token(), "Chi", "chi-list@a.example");
 
     mockMvc
-        .perform(get("/api/v1/users").header(TenantContext.HEADER, ada.id()))
+        .perform(get("/api/v1/users").header("Authorization", bearer(ada.token())))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$[*].id", contains(ada.ownerId(), chiId)))
         .andExpect(jsonPath("$[*].organizationId", contains(ada.id(), ada.id())))
         .andExpect(jsonPath("$[*].email", contains("ada-list@a.example", "chi-list@a.example")));
 
     mockMvc
-        .perform(get("/api/v1/users").header(TenantContext.HEADER, bola.id()))
+        .perform(get("/api/v1/users").header("Authorization", bearer(bola.token())))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$[*].email", contains("bola-list@b.example")));
   }
@@ -104,7 +110,7 @@ class OrganizationIsolationTest {
     mockMvc
         .perform(
             post("/api/v1/users")
-                .header(TenantContext.HEADER, ada.id())
+                .header("Authorization", bearer(ada.token()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(userJson("Ada", "ada.unique@a.example")))
         .andExpect(status().isConflict())
@@ -122,7 +128,7 @@ class OrganizationIsolationTest {
     mockMvc
         .perform(
             post("/api/v1/users")
-                .header(TenantContext.HEADER, bola.id())
+                .header("Authorization", bearer(bola.token()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(userJson("Ada", "shared@example.com")))
         .andExpect(status().isCreated())
@@ -131,30 +137,37 @@ class OrganizationIsolationTest {
   }
 
   @Test
-  void userRoutesRequireAValidOrganizationHeader() throws Exception {
+  void userRoutesRequireASession() throws Exception {
     mockMvc
         .perform(get("/api/v1/users"))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
-        .andExpect(jsonPath("$.message").value("Organization context is required."));
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+        .andExpect(jsonPath("$.message").value("Authentication is required."));
 
     mockMvc
-        .perform(get("/api/v1/users").header(TenantContext.HEADER, "not-a-uuid"))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.message").value("Organization context is invalid."));
+        .perform(get("/api/v1/users").header(TenantContext.HEADER, UUID.randomUUID().toString()))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.message").value("Authentication is required."));
+
+    mockMvc
+        .perform(get("/api/v1/users").header("Authorization", "Bearer not-a-session"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.message").value("Session is invalid."));
   }
 
   @Test
-  void aMissingOrganizationCannotGainAUser() throws Exception {
+  void organizationHeaderDoesNotSelectTheTenant() throws Exception {
+    CreatedOrg ada = createOrganization("Ada Header", "ada-header@a.example");
+
     mockMvc
         .perform(
             post("/api/v1/users")
+                .header("Authorization", bearer(ada.token()))
                 .header(TenantContext.HEADER, UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(userJson("Ada", "missing-org@a.example")))
-        .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("NOT_FOUND"))
-        .andExpect(jsonPath("$.message").value("Organization was not found."));
+                .content(userJson("Chi", "chi-header@a.example")))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.organizationId").value(ada.id()));
   }
 
   @Test
@@ -162,14 +175,14 @@ class OrganizationIsolationTest {
     CreatedOrg ada = createOrganization("Ada Leak", "ada-leak@a.example");
 
     mockMvc
-        .perform(get("/api/v1/users").header(TenantContext.HEADER, ada.id()))
+        .perform(get("/api/v1/users").header("Authorization", bearer(ada.token())))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$[0].email").value("ada-leak@a.example"));
 
     mockMvc
         .perform(get("/api/v1/users"))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.message").value("Organization context is required."));
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.message").value("Authentication is required."));
   }
 
   @Test
@@ -194,26 +207,58 @@ class OrganizationIsolationTest {
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.status").value("ACTIVE"))
             .andExpect(jsonPath("$.owner.status").value("ACTIVE"))
+            .andExpect(jsonPath("$.owner.role").value("OWNER"))
             .andReturn()
             .getResponse()
             .getContentAsString();
-    return new CreatedOrg(JsonPath.read(body, "$.id"), JsonPath.read(body, "$.owner.id"));
+    String id = JsonPath.read(body, "$.id");
+    String ownerId = JsonPath.read(body, "$.owner.id");
+    return new CreatedOrg(id, ownerId, login(id, email));
   }
 
-  private String createUser(String organizationId, String firstName, String email)
-      throws Exception {
+  private String login(String organizationId, String email) throws Exception {
     String body =
         mockMvc
             .perform(
-                post("/api/v1/users")
-                    .header(TenantContext.HEADER, organizationId)
+                post("/api/v1/sessions")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(userJson(firstName, email)))
+                    .content(sessionJson(organizationId, email, PASSWORD)))
             .andExpect(status().isCreated())
             .andReturn()
             .getResponse()
             .getContentAsString();
+    return JsonPath.read(body, "$.token");
+  }
+
+  private String createUser(String token, String firstName, String email) throws Exception {
+    String body =
+        mockMvc
+            .perform(
+                post("/api/v1/users")
+                    .header("Authorization", bearer(token))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(userJson(firstName, email)))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.role").value("STAFF"))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
     return JsonPath.read(body, "$.id");
+  }
+
+  private static String bearer(String token) {
+    return "Bearer " + token;
+  }
+
+  private static String sessionJson(String organizationId, String email, String password) {
+    return """
+        {
+          "organizationId": "%s",
+          "email": "%s",
+          "password": "%s"
+        }
+        """
+        .formatted(organizationId, email, password);
   }
 
   private static String organizationJson(String name, String email) {
@@ -223,11 +268,12 @@ class OrganizationIsolationTest {
           "owner": {
             "firstName": "Ada",
             "lastName": "Okeke",
-            "email": "%s"
+            "email": "%s",
+            "password": "%s"
           }
         }
         """
-        .formatted(name, email);
+        .formatted(name, email, PASSWORD);
   }
 
   private static String userJson(String firstName, String email) {
@@ -235,13 +281,14 @@ class OrganizationIsolationTest {
         {
           "firstName": "%s",
           "lastName": "Nwosu",
-          "email": "%s"
+          "email": "%s",
+          "password": "%s"
         }
         """
-        .formatted(firstName, email);
+        .formatted(firstName, email, PASSWORD);
   }
 
-  private record CreatedOrg(String id, String ownerId) {}
+  private record CreatedOrg(String id, String ownerId, String token) {}
 
   @TestConfiguration
   static class SteppedClockConfig {

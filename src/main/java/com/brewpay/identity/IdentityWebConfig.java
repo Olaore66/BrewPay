@@ -1,20 +1,20 @@
-package com.brewpay.platform.tenant;
+package com.brewpay.identity;
 
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
-public class TenantWebConfig implements WebMvcConfigurer {
+public class IdentityWebConfig implements WebMvcConfigurer {
 
-  private final TenantInterceptor tenantInterceptor;
+  private final SessionInterceptor sessionInterceptor;
 
-  public TenantWebConfig(TenantInterceptor tenantInterceptor) {
-    this.tenantInterceptor = tenantInterceptor;
+  public IdentityWebConfig(SessionInterceptor sessionInterceptor) {
+    this.sessionInterceptor = sessionInterceptor;
   }
 
   @Override
   public void addInterceptors(InterceptorRegistry registry) {
-    registry.addInterceptor(tenantInterceptor);
+    registry.addInterceptor(sessionInterceptor);
   }
 }

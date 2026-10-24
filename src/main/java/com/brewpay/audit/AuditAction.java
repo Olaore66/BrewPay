@@ -1,0 +1,10 @@
+package com.brewpay.audit;
+
+public enum AuditAction {
+  SESSION_CREATED,
+  SESSION_REJECTED,
+  SESSION_REVOKED,
+  USER_CREATED,
+  USER_CREATE_DENIED,
+  AUDIT_READ_DENIED
+}

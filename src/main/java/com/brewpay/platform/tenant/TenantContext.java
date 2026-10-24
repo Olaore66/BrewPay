@@ -7,11 +7,12 @@ import java.util.UUID;
 /**
  * The organization bound to the current request.
  *
- * <p>Slice 3 will set this from the authenticated session. Until then the HTTP layer copies {@code
- * X-Organization-Id} into this context. Repositories must still scope every child read by this id.
+ * <p>The session interceptor copies this from the authenticated session. {@code X-Organization-Id}
+ * is ignored. Repositories must still scope every child read by this id.
  */
 public final class TenantContext {
 
+  /** Old client header. The server does not read it. */
   public static final String HEADER = "X-Organization-Id";
 
   private static final ThreadLocal<UUID> CURRENT = new ThreadLocal<>();
@@ -25,7 +26,7 @@ public final class TenantContext {
   public static UUID require() {
     UUID organizationId = CURRENT.get();
     if (organizationId == null) {
-      throw new PlatformException(ErrorCode.BAD_REQUEST, "Organization context is required.");
+      throw new PlatformException(ErrorCode.UNAUTHORIZED, "Authentication is required.");
     }
     return organizationId;
   }

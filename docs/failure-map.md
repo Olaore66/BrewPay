@@ -8,5 +8,9 @@ When something breaks, name the rule, then open the package. The test name is th
 | Error JSON gained a new field, dropped `details`, or a 500 leaked the exception text | One error shape | `platform.error` | `PlatformHttpContractTest` |
 | A domain package imports Kolomoni | The bank stays behind the port | The importing package, and `banking.kolomoni` | `PackageRulesTest` |
 | Organization A receives organization B's user, or a user lookup succeeds with only a user id | Child reads include the organization id | `identity`, `platform.tenant` | `OrganizationIsolationTest`, `UserRepositoryContractTest` |
+| A caller chooses the organization with a header, or a revoked or expired token still works | The session chooses the organization | `identity` | `LoginSessionTest`, `OrganizationIsolationTest` |
+| Wrong password, unknown email, and unknown organization return different messages | Login failure has one message | `identity` | `LoginSessionTest` |
+| Staff adds a user, or staff reads the audit | Only the owner can add a user and read the audit | `access`, `identity`, `audit` | `LoginSessionTest` |
+| An audit row is missing, editable, or contains a password or session secret | Audit is append-only and records these actions | `audit` | `LoginSessionTest`, `AuditRepositoryContractTest` |
 
 Later slices add rows for unbalanced journals, duplicate webhooks, and provider timeouts. Do not remove a row when its test still exists.
