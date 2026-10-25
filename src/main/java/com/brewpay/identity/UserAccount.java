@@ -39,6 +39,10 @@ public class UserAccount {
   @Column(nullable = false)
   private UserStatus status;
 
+  @Enumerated(EnumType.STRING)
+  @Column(name = "kyc_status", nullable = false, length = 32)
+  private KycStatus kycStatus;
+
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 
@@ -53,6 +57,7 @@ public class UserAccount {
       String lastName,
       Role role,
       UserStatus status,
+      KycStatus kycStatus,
       Instant createdAt) {
     this.id = id;
     this.organizationId = organizationId;
@@ -62,7 +67,12 @@ public class UserAccount {
     this.lastName = lastName;
     this.role = role;
     this.status = status;
+    this.kycStatus = kycStatus;
     this.createdAt = createdAt;
+  }
+
+  public void applyVerification(KycStatus kycStatus) {
+    this.kycStatus = kycStatus;
   }
 
   public UUID getId() {
@@ -95,6 +105,10 @@ public class UserAccount {
 
   public UserStatus getStatus() {
     return status;
+  }
+
+  public KycStatus getKycStatus() {
+    return kycStatus;
   }
 
   public Instant getCreatedAt() {

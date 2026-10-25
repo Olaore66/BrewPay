@@ -208,6 +208,7 @@ class OrganizationIsolationTest {
             .andExpect(jsonPath("$.status").value("PENDING"))
             .andExpect(jsonPath("$.kycStatus").value("NOT_SUBMITTED"))
             .andExpect(jsonPath("$.owner.status").value("ACTIVE"))
+            .andExpect(jsonPath("$.owner.kycStatus").value("NOT_SUBMITTED"))
             .andExpect(jsonPath("$.owner.role").value("OWNER"))
             .andReturn()
             .getResponse()

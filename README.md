@@ -1,6 +1,6 @@
 # BrewPay
 
-Merchant financial operations platform. Slice 11 keeps money closed until the provider approves the business. Signup stays pending. A session chooses the organization. One organization still cannot read another's user, account, journal, stored key, collection, transfer, reconciliation finding, account name enquiry, beneficiary, or KYB submission.
+Merchant financial operations platform. Slice 12 keeps money closed until the provider approves the business and the owner. Signup stays pending. A session chooses the organization. One organization still cannot read another's user, account, journal, stored key, collection, transfer, reconciliation finding, account name enquiry, beneficiary, KYB submission, or KYC submission.
 
 ## Run the checks
 
@@ -55,7 +55,7 @@ The response includes a token once. Send it as `Authorization: Bearer` on later 
 
 `X-Organization-Id` is ignored. The session's organization is the tenant.
 
-Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, submit business verification, use the ledger routes, open a collection account, submit a transfer, run reconciliation, enquire an account name, or save a beneficiary. The audit records organization signup, login, rejected login, logout, user creation, business verification, ledger posts, reversals, collection accounts, collection credits, transfer submissions, reconciliation runs, account name enquiries, beneficiaries, and the denials. The rows are append-only. They do not contain the password, the session token, the webhook secret, the idempotency key, the destination account number, the registration number, or an amount.
+Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, submit business verification, use the ledger routes, open a collection account, submit a transfer, run reconciliation, enquire an account name, or save a beneficiary. Each signed-in user submits their own identity. The audit records organization signup, login, rejected login, logout, user creation, business verification, identity verification, ledger posts, reversals, collection accounts, collection credits, transfer submissions, reconciliation runs, account name enquiries, beneficiaries, and the denials. The rows are append-only. They do not contain the password, the session token, the webhook secret, the idempotency key, the destination account number, the registration number, the identification number, or an amount.
 
 ## Ledger
 
@@ -172,7 +172,25 @@ Signup creates the organization as `PENDING` with `kycStatus` `NOT_SUBMITTED`. T
 
 The local fake approves unless it is scripted to return `PENDING` or `REJECTED`. A merchant request cannot choose that verdict. `APPROVED` sets the organization to `ACTIVE`. A later submit returns `409` with `Business is already verified.` `PENDING` leaves the organization pending, blocks the ledger, and a later submit returns `409` with `Business verification is already in review.` `REJECTED` leaves the organization pending and the owner can submit again. `GET /api/v1/kyb-submissions` lists this organization's submissions, oldest first. A submission id from another organization returns `404` with `KYB submission was not found.` Staff receive `403`.
 
-Until `kycStatus` is `APPROVED`, an owner who calls the ledger, collections, transfers, name enquiry, beneficiaries, or reconciliation receives `403` with `Business verification is not complete.` Staff on those routes still receive `You do not have permission to perform this action.`
+Until the organization's `kycStatus` is `APPROVED`, an owner who calls the ledger, collections, transfers, name enquiry, beneficiaries, or reconciliation receives `403` with `Business verification is not complete.` Staff on those routes still receive `You do not have permission to perform this action.`
+
+## Identity verification
+
+Every user starts with `kycStatus` `NOT_SUBMITTED`. The owner and each staff user submit their own identity. There is no `Idempotency-Key`.
+
+```json
+{
+  "dateOfBirth": "1990-04-12",
+  "phone": "08031234567",
+  "identificationNumber": "22123456789"
+}
+```
+
+`POST /api/v1/kyc-submissions` returns `201`. The date is `YYYY-MM-DD` and is not after today. The phone is 8 to 15 digits with an optional leading `+`. The identification number is 11 digits. The response includes that number. The audit does not. `GET /api/v1/users` shows `kycStatus` and does not show the number. The call posts no journal.
+
+The local fake approves unless it is scripted to return `PENDING` or `REJECTED` for the person. A merchant request cannot choose that verdict. `APPROVED` sets that user's `kycStatus` to `APPROVED`. A later submit returns `409` with `Identity is already verified.` `PENDING` blocks the ledger and a later submit returns `409` with `Identity verification is already in review.` `REJECTED` can be submitted again. `GET /api/v1/kyc-submissions` lists only the signed-in user's submissions, oldest first. Another user, including the owner reading a staff submission, returns `404` with `KYC submission was not found.`
+
+An owner whose business is approved and whose own identity is not receives `403` with `Identity verification is not complete.`
 
 ## Errors
 
@@ -194,7 +212,7 @@ Every error body has the same four fields:
 | Package | Owns |
 |---|---|
 | `platform` | Correlation id, error shape, tenant context, health |
-| `identity` | Organizations, staff, sessions, and business verification |
+| `identity` | Organizations, staff, sessions, business verification, and identity verification |
 | `access` | Roles and the owner check |
 | `audit` | Append-only audit |
 | `ledger` | Accounts and balanced journals in kobo. Source of truth for money |

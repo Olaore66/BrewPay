@@ -12,13 +12,14 @@ import java.util.Optional;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
- * Money stays closed until the provider approves the business. Staff fall through so the route
- * still returns the permission denial. A request with no actor, including the public webhook, is
- * left alone.
+ * Money stays closed until the provider approves the business and the owner. Staff fall through so
+ * the route still returns the permission denial. A request with no actor, including the public
+ * webhook, is left alone.
  */
 public class MerchantClearance implements HandlerInterceptor {
 
   static final String NOT_COMPLETE = "Business verification is not complete.";
+  static final String IDENTITY_NOT_COMPLETE = "Identity verification is not complete.";
 
   private static final List<String> MONEY =
       List.of(
@@ -32,9 +33,11 @@ public class MerchantClearance implements HandlerInterceptor {
           "/api/v1/reconciliation-findings");
 
   private final OrganizationRepository organizations;
+  private final UserRepository users;
 
-  public MerchantClearance(OrganizationRepository organizations) {
+  public MerchantClearance(OrganizationRepository organizations, UserRepository users) {
     this.organizations = organizations;
+    this.users = users;
   }
 
   @Override
@@ -55,6 +58,14 @@ public class MerchantClearance implements HandlerInterceptor {
             .orElse(KycStatus.NOT_SUBMITTED);
     if (status != KycStatus.APPROVED) {
       throw new PlatformException(ErrorCode.FORBIDDEN, NOT_COMPLETE);
+    }
+    KycStatus person =
+        users
+            .findByIdAndOrganizationId(actor.userId(), actor.organizationId())
+            .map(UserAccount::getKycStatus)
+            .orElse(KycStatus.NOT_SUBMITTED);
+    if (person != KycStatus.APPROVED) {
+      throw new PlatformException(ErrorCode.FORBIDDEN, IDENTITY_NOT_COMPLETE);
     }
     return true;
   }

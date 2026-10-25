@@ -70,6 +70,7 @@ public class UserService {
             request.lastName().trim(),
             Role.STAFF,
             UserStatus.ACTIVE,
+            KycStatus.NOT_SUBMITTED,
             clock.instant());
     users.saveAndFlush(account);
     auditLog.record(

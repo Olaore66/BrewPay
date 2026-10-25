@@ -90,6 +90,7 @@ class KybRulesTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.registrationNumber").value(REGISTRATION))
         .andExpect(jsonPath("$.organizationStatus").value("ACTIVE"));
+    TestKyb.approvePerson(mockMvc, token);
     mockMvc
         .perform(
             post("/api/v1/ledger/accounts")
@@ -104,6 +105,7 @@ class KybRulesTest {
     String audit = audit(token);
     assertEquals(1, count(audit, "KYB_SUBMITTED"));
     assertFalse(audit.contains(REGISTRATION));
+    assertFalse(audit.contains(TestKyb.IDENTIFICATION));
   }
 
   @Test
@@ -226,6 +228,7 @@ class KybRulesTest {
         .andExpect(jsonPath("$.length()").value(2))
         .andExpect(jsonPath("$[0].id").value(rejectedId))
         .andExpect(jsonPath("$[1].id").value(approvedId));
+    TestKyb.approvePerson(mockMvc, token);
     mockMvc
         .perform(
             post("/api/v1/ledger/accounts")

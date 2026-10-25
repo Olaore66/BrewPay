@@ -20,12 +20,12 @@ Sources: [Anchor individual KYC](https://docs.getanchor.co/docs/individual-custo
 1. Virtual accounts. The first product is one permanent collection NUBAN per verified merchant. It is an external reference on our collection account. Dynamic per-invoice accounts wait.
 2. Static first. Dynamic is a later provider capability, not a branch in the ledger.
 3. Account ownership. Kolomoni owns the deposit account. BrewPay's ledger is the merchant sub-ledger. Customer funds are not BrewPay's own money.
-4. KYC. Kolomoni, behind `KycProvider`, performs KYB and ongoing monitoring. BrewPay collects the business profile, stores each verdict, and does not approve itself.
+4. KYC. Kolomoni, behind `KycProvider`, performs KYB, KYC, and ongoing monitoring. BrewPay collects the business profile and each person's profile, stores each verdict, and does not approve itself.
 5. Webhooks. The adapter checks an HMAC of the raw body with a webhook secret before the domain sees the event. The secret is not an API key. The fake bank already does this.
 6. Verify API. A signed webhook is not enough to post a journal. The next money slice calls the provider's payment read, and posts only when that read is settled. This slice does not add that call.
 7. Reversals. A reversal is a new journal. The original lines stay. A provider reversal arrives as a new event.
 8. Transfers. The owner submits once per idempotency key. A timeout stays `UNKNOWN` until a later status read or webhook. The Kolomoni status payload stays in the adapter.
-9. Limits. No naira cap is invented here. The first limit is the verification gate: an owner whose KYB is not `APPROVED` cannot use the ledger, collections, transfers, name enquiry, beneficiaries, or reconciliation.
+9. Limits. No naira cap is invented here. The first limit is the verification gate: an owner cannot use the ledger, collections, transfers, name enquiry, beneficiaries, or reconciliation until the business and that owner are both `APPROVED`.
 10. Settlement. Give value when the provider says the credit has settled, not when it says a credit is incoming. Settlement files are a later reconciliation input. No T+1 number is invented.
 11. Rate limits and uptime. Kolomoni must publish these. They are not guessed.
 12. Onboarding. BrewPay completes its own partner KYB and sandbox certification with Kolomoni before production. Each merchant then submits KYB through the API.
@@ -36,3 +36,5 @@ Sources: [Anchor individual KYC](https://docs.getanchor.co/docs/individual-custo
 ## What this slice changes
 
 `POST /api/v1/organizations` creates the business as `PENDING` with KYC `NOT_SUBMITTED`. The owner can sign in and add staff. `POST /api/v1/kyb-submissions` sends the profile to `KycProvider`. The local fake approves unless a test scripts `PENDING` or `REJECTED`. `APPROVED` sets the organization to `ACTIVE`. Until then, money routes return `403` with `Business verification is not complete.` Staff still receive the permission denial, not this message.
+
+`POST /api/v1/kyc-submissions` does the same for the signed-in user. The body is a date of birth, a phone number, and an 11-digit identification number. The number is not named BVN or NIN here. The provider decides which one it is. A user reads only their own submissions. Money stays closed until that owner is `APPROVED` as well. The message is then `Identity verification is not complete.`

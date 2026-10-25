@@ -6,7 +6,7 @@ import com.brewpay.platform.error.PlatformException;
 /**
  * The only permission rule in this slice: the owner adds users, reads the audit, submits business
  * verification, uses the ledger, opens collection accounts, submits transfers, runs reconciliation,
- * enquires account names, and saves beneficiaries.
+ * enquires account names, and saves beneficiaries. Each signed-in user submits their own identity.
  */
 public final class Permissions {
 

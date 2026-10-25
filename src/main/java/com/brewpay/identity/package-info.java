@@ -1,2 +1,2 @@
-/** Organizations, staff, sessions, and business verification. */
+/** Organizations, staff, sessions, business verification, and identity verification. */
 package com.brewpay.identity;

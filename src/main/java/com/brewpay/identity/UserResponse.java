@@ -9,6 +9,7 @@ public record UserResponse(
     String lastName,
     String email,
     String status,
+    String kycStatus,
     String role) {
 
   static UserResponse from(UserAccount user) {
@@ -19,6 +20,7 @@ public record UserResponse(
         user.getLastName(),
         user.getEmail(),
         user.getStatus().name(),
+        user.getKycStatus().name(),
         user.getRole().name());
   }
 }

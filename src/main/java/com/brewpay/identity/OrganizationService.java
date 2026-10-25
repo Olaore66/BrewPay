@@ -57,6 +57,7 @@ public class OrganizationService {
             owner.lastName().trim(),
             Role.OWNER,
             UserStatus.ACTIVE,
+            KycStatus.NOT_SUBMITTED,
             createdAt);
     users.saveAndFlush(account);
     auditLog.record(

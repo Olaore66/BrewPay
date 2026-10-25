@@ -358,6 +358,7 @@ class LedgerRulesTest {
                     "USER_CREATED",
                     "SESSION_CREATED",
                     "KYB_SUBMITTED",
+                    "KYC_SUBMITTED",
                     "SESSION_CREATED",
                     "ACCOUNT_CREATED",
                     "ACCOUNT_CREATED",

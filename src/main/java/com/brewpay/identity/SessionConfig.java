@@ -29,7 +29,7 @@ public class SessionConfig {
   }
 
   @Bean
-  MerchantClearance merchantClearance(OrganizationRepository organizations) {
-    return new MerchantClearance(organizations);
+  MerchantClearance merchantClearance(OrganizationRepository organizations, UserRepository users) {
+    return new MerchantClearance(organizations, users);
   }
 }

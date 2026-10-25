@@ -28,20 +28,23 @@ info:
        and match `userId` from the session. `OWNER` sees the money screens
        after verification. `STAFF` can list users and sign out. Every other
        authenticated route returns 403 for staff.
-    4. Submit business verification. `POST /api/v1/kyb-submissions`. Money
-       calls stay closed until `kycStatus` is `APPROVED` and the organization
-       is `ACTIVE`. Until then an owner receives 403
+    4. Submit business verification. `POST /api/v1/kyb-submissions`. Until
+       the organization is `ACTIVE`, an owner receives 403
        `Business verification is not complete.`
-    5. Ledger setup, owner only, after approval. Create an `ASSET` clearing
+    5. Submit the signed-in person's identity. `POST /api/v1/kyc-submissions`.
+       The owner and each staff user do this for themselves. Money calls stay
+       closed until that owner's `kycStatus` is also `APPROVED`. Until then
+       the owner receives 403 `Identity verification is not complete.`
+    6. Ledger setup, owner only, after both approvals. Create an `ASSET` clearing
        account and a `LIABILITY` merchant account before collections or
        transfers.
-    6. Collection account. Open it, then show `externalReference` as the
+    7. Collection account. Open it, then show `externalReference` as the
        account the customer pays. Credits appear later on
        `GET /api/v1/collections`. There is no websocket. Poll.
-    7. Pay someone. Enquire the account name, save a beneficiary if the
+    8. Pay someone. Enquire the account name, save a beneficiary if the
        merchant wants to keep it, then submit a transfer. A transfer does
        not read the beneficiary. Send the account number and bank code again.
-    8. Audit and reconciliation are owner operations screens.
+    9. Audit and reconciliation are owner operations screens.
 
     ## Rules that apply to every call
 
@@ -60,8 +63,10 @@ info:
     - Unknown routes return 404 `Resource was not found.`
     - Money routes are the ledger, collection accounts, collections, transfers,
       name enquiry, beneficiaries, and reconciliation. An owner whose
-      `kycStatus` is not `APPROVED` receives 403
-      `Business verification is not complete.` Staff on those routes still
+      business `kycStatus` is not `APPROVED` receives 403
+      `Business verification is not complete.` An owner whose business is
+      approved and whose own `kycStatus` is not `APPROVED` receives 403
+      `Identity verification is not complete.` Staff on those routes still
       receive 403 `You do not have permission to perform this action.`
     - A body that is not JSON returns 400 `Request could not be read.`
     - Bean validation returns 400 `Request validation failed.` The `details`
@@ -82,7 +87,7 @@ info:
 
     ## Not built
 
-    Document upload, BVN, NIN, email verification, invite links, a BrewPay
+    Document upload, a named BVN or NIN field, email verification, invite links, a BrewPay
     review queue, password reset, refresh tokens, beneficiary nicknames,
     beneficiary edits, a balance read, fees, numeric limits, and the live
     Kolomoni bank are not in this API. The provider approves or rejects the
@@ -97,6 +102,8 @@ tags:
     description: Create the merchant business and its owner. No session.
   - name: Business verification
     description: Send the business profile to the provider. Owner only. Does not move money.
+  - name: Identity verification
+    description: Send the signed-in person's profile to the provider. Does not move money.
   - name: Sessions
     description: Sign in and sign out.
   - name: Users
@@ -332,6 +339,138 @@ paths:
               example:
                 code: NOT_FOUND
                 message: KYB submission was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+
+  /api/v1/kyc-submissions:
+    post:
+      tags: [Identity verification]
+      operationId: submitKyc
+      summary: Send the signed-in person's identity to the provider
+      description: |
+        Any signed-in user submits their own identity. There is no user id
+        in the body and no `Idempotency-Key`. The provider returns the
+        verdict. BrewPay stores it and does not invent an approval.
+
+        `dateOfBirth` is `YYYY-MM-DD` and is not after today.
+        `identificationNumber` is 11 digits. The response returns that
+        number. The audit does not. `GET /api/v1/users` shows `kycStatus`
+        and does not show the number.
+
+        `APPROVED` sets that user's `kycStatus` to `APPROVED`. It does not
+        change `status`, which stays `ACTIVE`. `PENDING` leaves the user
+        unverified. `REJECTED` can be submitted again.
+
+        A second submit while the status is `PENDING` is 409
+        `Identity verification is already in review.` A second submit after
+        `APPROVED` is 409 `Identity is already verified.` Neither calls the
+        provider again.
+
+        The call posts no journal. On the local fake the verdict is
+        `APPROVED` unless a test scripts the person queue.
+
+        - 400 `Date of birth is invalid.` The provider is not called.
+        - 400 `Phone number is invalid.` The provider is not called.
+        - 400 `Identification number is invalid.` The provider is not called.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitKycRequest"
+            example:
+              dateOfBirth: "1990-04-12"
+              phone: "08031234567"
+              identificationNumber: "22123456789"
+      responses:
+        "201":
+          description: The provider verdict was stored for this user.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycSubmission"
+        "400":
+          $ref: "#/components/responses/ValidationOrBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Identity verification is already pending or already approved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: CONFLICT
+                message: Identity verification is already in review.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+    get:
+      tags: [Identity verification]
+      operationId: listKycSubmissions
+      summary: List the signed-in user's identity submissions
+      description: |
+        Oldest first. Only that user's rows. Another user in the same
+        organization, including the owner, does not see these rows.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Submissions for the signed-in user.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/KycSubmission"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/kyc-submissions/{id}:
+    get:
+      tags: [Identity verification]
+      operationId: getKycSubmission
+      summary: Read one identity submission for the signed-in user
+      description: |
+        Another user's id, another organization's id, and an unknown id are
+        all 404 `KYC submission was not found.` `X-Organization-Id` does not
+        change that.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The submission.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycSubmission"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No submission with that id for this user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: KYC submission was not found.
                 correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
                 details: []
 
@@ -1692,7 +1831,9 @@ components:
       description: |
         Staff receive `You do not have permission to perform this action.`
         An owner whose business is not approved receives
-        `Business verification is not complete.` on money routes.
+        `Business verification is not complete.` on money routes. An owner
+        whose business is approved and whose identity is not receives
+        `Identity verification is not complete.`
       content:
         application/json:
           schema:
@@ -1865,7 +2006,7 @@ components:
           maxLength: 72
     User:
       type: object
-      required: [id, organizationId, firstName, lastName, email, status, role]
+      required: [id, organizationId, firstName, lastName, email, status, kycStatus, role]
       properties:
         id:
           type: string
@@ -1883,6 +2024,13 @@ components:
         status:
           type: string
           enum: [ACTIVE]
+        kycStatus:
+          type: string
+          enum: [NOT_SUBMITTED, PENDING, APPROVED, REJECTED]
+          description: |
+            This person's provider verdict. `NOT_SUBMITTED` until they call
+            `POST /api/v1/kyc-submissions`. This is not the identification
+            number.
         role:
           type: string
           enum: [OWNER, STAFF]
@@ -1927,6 +2075,7 @@ components:
             - BENEFICIARY_CREATE_DENIED
             - KYB_SUBMITTED
             - KYB_SUBMIT_DENIED
+            - KYC_SUBMITTED
         targetType:
           type: string
           enum:
@@ -1942,6 +2091,7 @@ components:
             - ACCOUNT_NAME_ENQUIRY
             - BENEFICIARY
             - KYB_SUBMISSION
+            - KYC_SUBMISSION
         targetId:
           type: string
           format: uuid
@@ -2262,6 +2412,51 @@ components:
             The organization's status when this response was built. It becomes
             `ACTIVE` when a verdict is `APPROVED`. Older rows in a later list
             show that current status too.
+    SubmitKycRequest:
+      type: object
+      required: [dateOfBirth, phone, identificationNumber]
+      properties:
+        dateOfBirth:
+          type: string
+          format: date
+          description: `YYYY-MM-DD`. Not after today.
+        phone:
+          type: string
+          description: 8 to 15 digits, with an optional leading `+`.
+        identificationNumber:
+          type: string
+          description: 11 digits. The provider decides whether this is a BVN or a NIN.
+    KycSubmission:
+      type: object
+      required:
+        - id
+        - organizationId
+        - userId
+        - dateOfBirth
+        - phone
+        - identificationNumber
+        - kycStatus
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        dateOfBirth:
+          type: string
+          format: date
+        phone:
+          type: string
+        identificationNumber:
+          type: string
+          description: Returned on this user's submission. It is not written to the audit.
+        kycStatus:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
     Beneficiary:
       type: object
       required:
