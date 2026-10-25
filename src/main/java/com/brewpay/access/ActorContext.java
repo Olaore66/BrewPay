@@ -2,6 +2,7 @@ package com.brewpay.access;
 
 import com.brewpay.platform.error.ErrorCode;
 import com.brewpay.platform.error.PlatformException;
+import java.util.Optional;
 
 /**
  * Who is calling. The session interceptor sets this. Repositories must not trust a client header.
@@ -14,6 +15,10 @@ public final class ActorContext {
 
   public static void set(Actor actor) {
     CURRENT.set(actor);
+  }
+
+  public static Optional<Actor> current() {
+    return Optional.ofNullable(CURRENT.get());
   }
 
   public static Actor require() {

@@ -27,4 +27,9 @@ public class SessionConfig {
   SessionInterceptor sessionInterceptor(SessionService sessions) {
     return new SessionInterceptor(sessions);
   }
+
+  @Bean
+  MerchantClearance merchantClearance(OrganizationRepository organizations) {
+    return new MerchantClearance(organizations);
+  }
 }

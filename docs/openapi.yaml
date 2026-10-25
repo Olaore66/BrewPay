@@ -3,8 +3,8 @@ info:
   title: BrewPay API
   version: 0.1.0
   description: |
-    Contract for the merchant web app. This file matches the API on `main`
-    at `6330cb54c685ae7ee420ae1ac9cced8f5ef12988`.
+    Contract for the merchant web app. This file matches the routes in this
+    repository, including business verification.
 
     Import this file into Swagger Editor or Postman. The running server does
     not serve Swagger UI yet.
@@ -18,24 +18,30 @@ info:
 
     Suggested screens, in order:
 
-    1. Sign up. `POST /api/v1/organizations`. Keep `id`. This creates the
-       business and its owner. It is not KYC onboarding.
+    1. Sign up. `POST /api/v1/organizations`. Keep `id`. The business is
+       `PENDING` and `kycStatus` is `NOT_SUBMITTED`.
     2. Sign in. `POST /api/v1/sessions`. Store `token` in memory. Send
        `Authorization: Bearer <token>` on later calls. The word `Bearer` is
-       case-sensitive and must be followed by one space.
+       case-sensitive and must be followed by one space. Login works while
+       the business is still pending.
     3. Learn the role. The session body has no role. Call `GET /api/v1/users`
-       and match `userId` from the session. `OWNER` sees the money screens.
-       `STAFF` can list users and sign out. Every other authenticated route
-       returns 403 for staff.
-    4. Ledger setup, owner only. Create an `ASSET` clearing account and a
-       `LIABILITY` merchant account before collections or transfers.
-    5. Collection account. Open it, then show `externalReference` as the
+       and match `userId` from the session. `OWNER` sees the money screens
+       after verification. `STAFF` can list users and sign out. Every other
+       authenticated route returns 403 for staff.
+    4. Submit business verification. `POST /api/v1/kyb-submissions`. Money
+       calls stay closed until `kycStatus` is `APPROVED` and the organization
+       is `ACTIVE`. Until then an owner receives 403
+       `Business verification is not complete.`
+    5. Ledger setup, owner only, after approval. Create an `ASSET` clearing
+       account and a `LIABILITY` merchant account before collections or
+       transfers.
+    6. Collection account. Open it, then show `externalReference` as the
        account the customer pays. Credits appear later on
        `GET /api/v1/collections`. There is no websocket. Poll.
-    6. Pay someone. Enquire the account name, save a beneficiary if the
+    7. Pay someone. Enquire the account name, save a beneficiary if the
        merchant wants to keep it, then submit a transfer. A transfer does
        not read the beneficiary. Send the account number and bank code again.
-    7. Audit and reconciliation are owner operations screens.
+    8. Audit and reconciliation are owner operations screens.
 
     ## Rules that apply to every call
 
@@ -52,6 +58,11 @@ info:
     - There is no CORS configuration. A browser app on another origin will be
       blocked until a proxy or a later CORS change exists.
     - Unknown routes return 404 `Resource was not found.`
+    - Money routes are the ledger, collection accounts, collections, transfers,
+      name enquiry, beneficiaries, and reconciliation. An owner whose
+      `kycStatus` is not `APPROVED` receives 403
+      `Business verification is not complete.` Staff on those routes still
+      receive 403 `You do not have permission to perform this action.`
     - A body that is not JSON returns 400 `Request could not be read.`
     - Bean validation returns 400 `Request validation failed.` The `details`
       array names each field. Nested owner fields look like `owner.email`.
@@ -71,10 +82,11 @@ info:
 
     ## Not built
 
-    KYC, document upload, BVN, business address, CAC number, email
-    verification, invite links, an approval queue, password reset, refresh
-    tokens, beneficiary nicknames, beneficiary edits, a balance read, and
-    the live Kolomoni bank are not in this API.
+    Document upload, BVN, NIN, email verification, invite links, a BrewPay
+    review queue, password reset, refresh tokens, beneficiary nicknames,
+    beneficiary edits, a balance read, fees, numeric limits, and the live
+    Kolomoni bank are not in this API. The provider approves or rejects the
+    business profile. BrewPay does not decide that verdict.
 servers:
   - url: http://localhost:8081
     description: Local API. Use 8081 when Apache httpd holds 8080.
@@ -83,6 +95,8 @@ tags:
     description: Ready check. No session.
   - name: Organizations
     description: Create the merchant business and its owner. No session.
+  - name: Business verification
+    description: Send the business profile to the provider. Owner only. Does not move money.
   - name: Sessions
     description: Sign in and sign out.
   - name: Users
@@ -137,14 +151,17 @@ paths:
       summary: Sign up a merchant and its owner
       description: |
         This is the only signup call. It creates one organization with status
-        `ACTIVE` and one user with role `OWNER` and status `ACTIVE`.
+        `PENDING` and `kycStatus` `NOT_SUBMITTED`, and one user with role
+        `OWNER` and status `ACTIVE`.
 
-        It does not collect KYC, a CAC number, an address, or a bank account.
-        The organization is usable immediately. There is no approval step.
+        It does not collect the business address or registration number.
+        Those go to `POST /api/v1/kyb-submissions` after login. Money routes
+        stay closed until that verdict is `APPROVED`.
 
         Keep `id`. Login requires it, because the same email may exist in
         another organization. Email is stored in lowercase. The password is
-        bcrypt and is not returned.
+        bcrypt and is not returned. Login works while the organization is
+        `PENDING`.
 
         There is no `GET` for an organization. The signup response and the
         session are how the app knows the organization id.
@@ -176,6 +193,147 @@ paths:
                 $ref: "#/components/schemas/Organization"
         "400":
           $ref: "#/components/responses/ValidationOrBadRequest"
+
+  /api/v1/kyb-submissions:
+    post:
+      tags: [Business verification]
+      operationId: submitKyb
+      summary: Send the business profile to the provider
+      description: |
+        Owner only. There is no `Idempotency-Key`. The provider returns the
+        verdict. BrewPay stores it and does not invent an approval.
+
+        `businessType` is `SOLE_PROPRIETOR`, `PARTNERSHIP`, or
+        `LIMITED_COMPANY`. A partnership or limited company must send
+        `registrationNumber`. A sole proprietor may omit it. The response
+        returns that number. The audit does not.
+
+        `APPROVED` sets the organization to `ACTIVE`. `PENDING` leaves it
+        pending. `REJECTED` leaves it pending and the owner can submit again.
+
+        A second submit while the status is `PENDING` is 409
+        `Business verification is already in review.` A second submit after
+        `APPROVED` is 409 `Business is already verified.` Neither calls the
+        provider again.
+
+        The call posts no journal. On the local fake the verdict is
+        `APPROVED` unless a test scripts `PENDING` or `REJECTED`. A merchant
+        request cannot choose it.
+
+        - 400 `Business type is invalid.` The provider is not called.
+        - 400 `Registration number is required.` The provider is not called.
+        - 403 `You do not have permission to perform this action.` Staff.
+          The provider is not called.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitKybRequest"
+            example:
+              tradingName: Ada Trading
+              businessType: LIMITED_COMPANY
+              registrationNumber: RC1234567
+              addressLine: 12 Market Road
+              state: Lagos
+              category: Retail
+      responses:
+        "201":
+          description: The provider verdict was stored.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KybSubmission"
+        "400":
+          $ref: "#/components/responses/ValidationOrBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Verification is already pending or already approved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: CONFLICT
+                message: Business verification is already in review.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
+    get:
+      tags: [Business verification]
+      operationId: listKybSubmissions
+      summary: List this organization's verification submissions
+      description: |
+        Owner only. Oldest first. There is no pagination. Staff receive 403
+        and that denial is not a separate KYB audit row.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Submissions for the signed-in organization.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/KybSubmission"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/kyb-submissions/{id}:
+    get:
+      tags: [Business verification]
+      operationId: getKybSubmission
+      summary: Read one verification submission
+      description: |
+        Owner only. Another organization's id and an unknown id are both
+        404 `KYB submission was not found.` `X-Organization-Id` does not
+        change that.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The submission.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KybSubmission"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No submission with that id in this organization.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                code: NOT_FOUND
+                message: KYB submission was not found.
+                correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
+                details: []
 
   /api/v1/sessions:
     post:
@@ -1531,7 +1689,10 @@ components:
             correlationId: 2f1c8a0e-4b6d-4e2a-9c1f-0a1b2c3d4e5f
             details: []
     Forbidden:
-      description: The signed-in user is staff, and this route is owner only.
+      description: |
+        Staff receive `You do not have permission to perform this action.`
+        An owner whose business is not approved receives
+        `Business verification is not complete.` on money routes.
       content:
         application/json:
           schema:
@@ -1631,7 +1792,7 @@ components:
           maxLength: 72
     Organization:
       type: object
-      required: [id, name, status, owner]
+      required: [id, name, status, kycStatus, owner]
       properties:
         id:
           type: string
@@ -1640,7 +1801,13 @@ components:
           type: string
         status:
           type: string
-          enum: [ACTIVE]
+          enum: [PENDING, ACTIVE]
+          description: |
+            `PENDING` until KYB is approved. `ACTIVE` after an `APPROVED`
+            verdict. A rejection leaves this `PENDING`.
+        kycStatus:
+          type: string
+          enum: [NOT_SUBMITTED, PENDING, APPROVED, REJECTED]
         owner:
           $ref: "#/components/schemas/User"
     CreateSessionRequest:
@@ -1758,6 +1925,8 @@ components:
             - ACCOUNT_NAME_ENQUIRY_DENIED
             - BENEFICIARY_CREATED
             - BENEFICIARY_CREATE_DENIED
+            - KYB_SUBMITTED
+            - KYB_SUBMIT_DENIED
         targetType:
           type: string
           enum:
@@ -1772,6 +1941,7 @@ components:
             - RECONCILIATION_RUN
             - ACCOUNT_NAME_ENQUIRY
             - BENEFICIARY
+            - KYB_SUBMISSION
         targetId:
           type: string
           format: uuid
@@ -2021,6 +2191,77 @@ components:
           type: string
         accountName:
           type: string
+    SubmitKybRequest:
+      type: object
+      required: [tradingName, businessType, addressLine, state, category]
+      properties:
+        tradingName:
+          type: string
+          maxLength: 160
+        businessType:
+          type: string
+          enum: [SOLE_PROPRIETOR, PARTNERSHIP, LIMITED_COMPANY]
+        registrationNumber:
+          type: string
+          maxLength: 40
+          nullable: true
+          description: |
+            Required for `PARTNERSHIP` and `LIMITED_COMPANY`. Omitted or
+            blank for a sole proprietor is stored as null.
+        addressLine:
+          type: string
+          maxLength: 200
+        state:
+          type: string
+          maxLength: 40
+        category:
+          type: string
+          maxLength: 80
+    KybSubmission:
+      type: object
+      required:
+        - id
+        - organizationId
+        - tradingName
+        - businessType
+        - addressLine
+        - state
+        - category
+        - kycStatus
+        - organizationStatus
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        tradingName:
+          type: string
+        businessType:
+          type: string
+          enum: [SOLE_PROPRIETOR, PARTNERSHIP, LIMITED_COMPANY]
+        registrationNumber:
+          type: string
+          nullable: true
+          description: Returned on the submission. It is not written to the audit.
+        addressLine:
+          type: string
+        state:
+          type: string
+        category:
+          type: string
+        kycStatus:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+          description: The provider verdict stored on this submission.
+        organizationStatus:
+          type: string
+          enum: [PENDING, ACTIVE]
+          description: |
+            The organization's status when this response was built. It becomes
+            `ACTIVE` when a verdict is `APPROVED`. Older rows in a later list
+            show that current status too.
     Beneficiary:
       type: object
       required:

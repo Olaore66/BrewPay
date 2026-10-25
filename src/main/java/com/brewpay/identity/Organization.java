@@ -22,16 +22,29 @@ public class Organization {
   @Column(nullable = false)
   private OrganizationStatus status;
 
+  @Enumerated(EnumType.STRING)
+  @Column(name = "kyc_status", nullable = false)
+  private KycStatus kycStatus;
+
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 
   protected Organization() {}
 
-  public Organization(UUID id, String name, OrganizationStatus status, Instant createdAt) {
+  public Organization(
+      UUID id, String name, OrganizationStatus status, KycStatus kycStatus, Instant createdAt) {
     this.id = id;
     this.name = name;
     this.status = status;
+    this.kycStatus = kycStatus;
     this.createdAt = createdAt;
+  }
+
+  public void applyVerification(KycStatus kycStatus) {
+    this.kycStatus = kycStatus;
+    if (kycStatus == KycStatus.APPROVED) {
+      this.status = OrganizationStatus.ACTIVE;
+    }
   }
 
   public UUID getId() {
@@ -44,6 +57,10 @@ public class Organization {
 
   public OrganizationStatus getStatus() {
     return status;
+  }
+
+  public KycStatus getKycStatus() {
+    return kycStatus;
   }
 
   public Instant getCreatedAt() {

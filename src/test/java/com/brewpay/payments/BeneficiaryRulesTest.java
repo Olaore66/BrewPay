@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.brewpay.banking.fake.FakeNameEnquiryProvider;
+import com.brewpay.identity.TestKyb;
 import com.brewpay.platform.correlation.CorrelationIds;
 import com.brewpay.platform.tenant.TenantContext;
 import com.jayway.jsonpath.JsonPath;
@@ -362,7 +363,9 @@ class BeneficiaryRulesTest {
             .andReturn()
             .getResponse()
             .getContentAsString();
-    return new CreatedOrg(JsonPath.read(body, "$.id"));
+    String id = JsonPath.read(body, "$.id");
+    TestKyb.approve(mockMvc, login(id, email));
+    return new CreatedOrg(id);
   }
 
   private String login(String organizationId, String email) throws Exception {

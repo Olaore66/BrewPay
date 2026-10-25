@@ -1,6 +1,6 @@
 # BrewPay
 
-Merchant financial operations platform. Slice 10 saves a beneficiary from the bank's account name and posts no journal. The same account is stored once. A session chooses the organization. One organization still cannot read another's user, account, journal, stored key, collection, transfer, reconciliation finding, account name enquiry, or beneficiary.
+Merchant financial operations platform. Slice 11 keeps money closed until the provider approves the business. Signup stays pending. A session chooses the organization. One organization still cannot read another's user, account, journal, stored key, collection, transfer, reconciliation finding, account name enquiry, beneficiary, or KYB submission.
 
 ## Run the checks
 
@@ -55,7 +55,7 @@ The response includes a token once. Send it as `Authorization: Bearer` on later 
 
 `X-Organization-Id` is ignored. The session's organization is the tenant.
 
-Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, use the ledger routes, open a collection account, submit a transfer, run reconciliation, enquire an account name, or save a beneficiary. The audit records organization signup, login, rejected login, logout, user creation, ledger posts, reversals, collection accounts, collection credits, transfer submissions, reconciliation runs, account name enquiries, beneficiaries, and the denials. The rows are append-only. They do not contain the password, the session token, the webhook secret, the idempotency key, the destination account number, or an amount.
+Staff can read users in that organization. Only the owner can add a user, call `GET /api/v1/audit-events`, submit business verification, use the ledger routes, open a collection account, submit a transfer, run reconciliation, enquire an account name, or save a beneficiary. The audit records organization signup, login, rejected login, logout, user creation, business verification, ledger posts, reversals, collection accounts, collection credits, transfer submissions, reconciliation runs, account name enquiries, beneficiaries, and the denials. The rows are append-only. They do not contain the password, the session token, the webhook secret, the idempotency key, the destination account number, the registration number, or an amount.
 
 ## Ledger
 
@@ -153,6 +153,27 @@ When the provider has no such account, the response is `404` with `Account name 
 
 The local fake bank answers `Fake Account` unless it is scripted to return a name, miss, or time out. A merchant request cannot choose that answer.
 
+## Business verification
+
+Signup creates the organization as `PENDING` with `kycStatus` `NOT_SUBMITTED`. The owner can sign in. Money routes stay closed until the provider approves the business.
+
+```json
+{
+  "tradingName": "Ada Trading",
+  "businessType": "LIMITED_COMPANY",
+  "registrationNumber": "RC1234567",
+  "addressLine": "12 Market Road",
+  "state": "Lagos",
+  "category": "Retail"
+}
+```
+
+`POST /api/v1/kyb-submissions` returns `201`. There is no `Idempotency-Key`. The business type is `SOLE_PROPRIETOR`, `PARTNERSHIP`, or `LIMITED_COMPANY`. A limited company or a partnership must send a registration number. A sole proprietor may omit it. The response includes that number. The audit does not. The call posts no journal.
+
+The local fake approves unless it is scripted to return `PENDING` or `REJECTED`. A merchant request cannot choose that verdict. `APPROVED` sets the organization to `ACTIVE`. A later submit returns `409` with `Business is already verified.` `PENDING` leaves the organization pending, blocks the ledger, and a later submit returns `409` with `Business verification is already in review.` `REJECTED` leaves the organization pending and the owner can submit again. `GET /api/v1/kyb-submissions` lists this organization's submissions, oldest first. A submission id from another organization returns `404` with `KYB submission was not found.` Staff receive `403`.
+
+Until `kycStatus` is `APPROVED`, an owner who calls the ledger, collections, transfers, name enquiry, beneficiaries, or reconciliation receives `403` with `Business verification is not complete.` Staff on those routes still receive `You do not have permission to perform this action.`
+
 ## Errors
 
 Every error body has the same four fields:
@@ -173,13 +194,13 @@ Every error body has the same four fields:
 | Package | Owns |
 |---|---|
 | `platform` | Correlation id, error shape, tenant context, health |
-| `identity` | Organizations, staff, sessions |
+| `identity` | Organizations, staff, sessions, and business verification |
 | `access` | Roles and the owner check |
 | `audit` | Append-only audit |
 | `ledger` | Accounts and balanced journals in kobo. Source of truth for money |
 | `payments` | Idempotency, collections, transfers, account name enquiries, and beneficiaries. Money moves only through the ledger |
 | `banking` | Provider port |
-| `banking.fake` | Fake bank adapter. Signature checks, fake payloads, a scripted statement, and a scripted account name stay here |
+| `banking.fake` | Fake bank adapter. Signature checks, fake payloads, a scripted statement, a scripted account name, and a scripted business-verification verdict stay here |
 | `banking.kolomoni` | Kolomoni adapter only. Empty in this slice |
 | `reconciliation` | Compares the provider statement to collections and transfers. Flags mismatches and leaves the ledger unchanged |
 | `notifications` | Email and SMS |

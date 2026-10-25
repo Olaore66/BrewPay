@@ -39,7 +39,11 @@ public class OrganizationService {
     Instant createdAt = clock.instant();
     Organization organization =
         new Organization(
-            UUID.randomUUID(), request.name().trim(), OrganizationStatus.ACTIVE, createdAt);
+            UUID.randomUUID(),
+            request.name().trim(),
+            OrganizationStatus.PENDING,
+            KycStatus.NOT_SUBMITTED,
+            createdAt);
     organizations.saveAndFlush(organization);
 
     CreateOrganizationRequest.Owner owner = request.owner();

@@ -8,13 +8,17 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class IdentityWebConfig implements WebMvcConfigurer {
 
   private final SessionInterceptor sessionInterceptor;
+  private final MerchantClearance merchantClearance;
 
-  public IdentityWebConfig(SessionInterceptor sessionInterceptor) {
+  public IdentityWebConfig(
+      SessionInterceptor sessionInterceptor, MerchantClearance merchantClearance) {
     this.sessionInterceptor = sessionInterceptor;
+    this.merchantClearance = merchantClearance;
   }
 
   @Override
   public void addInterceptors(InterceptorRegistry registry) {
     registry.addInterceptor(sessionInterceptor);
+    registry.addInterceptor(merchantClearance);
   }
 }

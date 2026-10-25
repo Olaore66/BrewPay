@@ -21,5 +21,6 @@ When something breaks, name the rule, then open the package. The test name is th
 | A reconciliation run changes a journal, collection, or transfer, or flags the same mismatch twice | A reconciliation run flags a mismatch and does not rewrite history | `reconciliation` | `ReconciliationRulesTest`, `ReconciliationRepositoryContractTest` |
 | An account name enquiry posts a journal, stores a miss, or one organization reads another's enquiry | An account name enquiry stores a provider name and does not move money | `payments`, `banking.fake` | `NameEnquiryRulesTest`, `NameEnquiryRepositoryContractTest` |
 | A beneficiary posts a journal, stores a miss or a timeout, saves the same account twice, or one organization reads another's beneficiary | A beneficiary stores one provider name per account and does not move money | `payments`, `banking.fake` | `BeneficiaryRulesTest`, `BeneficiaryRepositoryContractTest` |
+| An unverified business moves money, the platform approves itself, or one organization reads another's KYB submission | The provider verdict is stored, and money stays closed until that verdict is approved | `identity`, `banking.fake` | `KybRulesTest`, `KybRepositoryContractTest` |
 
 Later slices add the Kolomoni adapter. Do not remove a row when its test still exists.

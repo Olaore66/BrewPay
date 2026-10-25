@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.brewpay.banking.fake.FakeBankProperties;
 import com.brewpay.banking.fake.FakeBankWebhookController;
+import com.brewpay.identity.TestKyb;
 import com.brewpay.platform.correlation.CorrelationIds;
 import com.brewpay.platform.tenant.TenantContext;
 import com.jayway.jsonpath.JsonPath;
@@ -453,7 +454,9 @@ class CollectionRulesTest {
             .andReturn()
             .getResponse()
             .getContentAsString();
-    return new CreatedOrg(JsonPath.read(body, "$.id"));
+    String id = JsonPath.read(body, "$.id");
+    TestKyb.approve(mockMvc, login(id, email));
+    return new CreatedOrg(id);
   }
 
   private String login(String organizationId, String email) throws Exception {
